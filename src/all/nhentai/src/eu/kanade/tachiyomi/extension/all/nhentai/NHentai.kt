@@ -62,14 +62,17 @@ open class NHentai(
             filterInclude = listOf("chrome"),
         )
 
+    val nhConfig: NHConfig by lazy {
+        client.newCall(GET("$baseUrl/api/v2/config", headers)).execute().body.string().parseAs<NHConfig>()
+    }
+
     private var displayFullTitle: Boolean = when (preferences.getString(TITLE_PREF, "full")) {
         "full" -> true
         else -> false
     }
 
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
-    private val dataRegex = Regex("""JSON\.parse\(\s*"(.*)"\s*\)""")
-    private val hentaiSelector = "script:containsData(JSON.parse):not(:containsData(media_server)):not(:containsData(avatar_url))"
+    private val hentaiSelector = "script[data-url^=\"/api/v2/galleries/\"]"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
@@ -207,10 +210,10 @@ open class NHentai(
 
     override fun mangaDetailsParse(document: Document): SManga {
         val data = document.getHentaiData()
-        val cdnUrl = document.getCdnUrls(thumbnail = true).random()
+        val cdnUrl = nhConfig.thumb_servers.random()
         return SManga.create().apply {
             title = if (displayFullTitle) data.title.english ?: data.title.japanese ?: data.title.pretty!! else data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
-            thumbnail_url = "https://$cdnUrl/galleries/${data.media_id}/1t.${data.images.pages[0].extension}"
+            thumbnail_url = "$cdnUrl/galleries/${data.media_id}/cover.${data.pages[0].extension}"
             status = SManga.COMPLETED
             artist = getArtists(data)
             author = getGroups(data) ?: getArtists(data)
@@ -219,7 +222,7 @@ open class NHentai(
                 .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
                 .plus(data.title.japanese ?: "")
                 .plus("\n\n")
-                .plus("Pages: ${data.images.pages.size}\n")
+                .plus("Pages: ${data.pages.size}\n")
                 .plus("Favorited by: ${data.num_favorites}\n")
                 .plus(getTagDescription(data))
             genre = getTags(data)
@@ -249,34 +252,18 @@ open class NHentai(
 
     override fun pageListParse(document: Document): List<Page> {
         val data = document.getHentaiData()
-        val cdnUrls = document.getCdnUrls(thumbnail = false)
+        val cdnUrls = nhConfig.image_servers
 
-        return data.images.pages.mapIndexed { i, image ->
+        return data.pages.mapIndexed { i, image ->
             Page(
                 index = i,
-                imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.${image.extension}",
+                imageUrl = "${cdnUrls.random()}/${image.path}",
             )
         }
     }
 
-    private fun Document.getHentaiData(): Hentai {
-        val script = selectFirst(hentaiSelector)!!.data()
-        return dataRegex.find(script)!!.groupValues[1].parseAs()
-    }
+    private fun Document.getHentaiData(): Hentai = selectFirst(hentaiSelector)!!.data().parseAs<HentaiData>().body.parseAs()
 
-    private fun Document.getCdnUrls(thumbnail: Boolean): List<String> {
-        val regex = Regex(
-            if (thumbnail) {
-                """thumb_cdn_urls:\s*(\[.*])"""
-            } else {
-                """image_cdn_urls:\s*(\[.*])"""
-            },
-        )
-        val html = body().html()
-        val cdnJson = regex.find(html)!!.groupValues[1]
-
-        return cdnJson.parseAs<List<String>>()
-    }
 
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
@@ -321,11 +308,11 @@ open class NHentai(
         UriPartFilter(
             "Sort By",
             arrayOf(
+                Pair("Recent", "date"),
                 Pair("Popular: All Time", "popular"),
                 Pair("Popular: Month", "popular-month"),
                 Pair("Popular: Week", "popular-week"),
                 Pair("Popular: Today", "popular-today"),
-                Pair("Recent", "date"),
             ),
         )
 

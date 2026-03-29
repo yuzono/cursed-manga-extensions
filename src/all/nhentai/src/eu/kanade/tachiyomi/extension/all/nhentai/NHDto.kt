@@ -3,9 +3,15 @@ package eu.kanade.tachiyomi.extension.all.nhentai
 import kotlinx.serialization.Serializable
 
 @Serializable
+class NHConfig(val image_servers: List<String>, val thumb_servers: List<String>)
+
+@Serializable
+class HentaiData(val body: String)
+
+@Serializable
 class Hentai(
     var id: Int,
-    val images: Images,
+    val pages: List<Image>,
     val media_id: String,
     val tags: List<Tag>,
     val title: Title,
@@ -21,20 +27,16 @@ class Title(
 )
 
 @Serializable
-class Images(
-    val pages: List<Image>,
-)
-
-@Serializable
 class Image(
-    private val t: String,
+    val path: String,
 ) {
-    val extension get() = when (t) {
-        "w" -> "webp"
-        "p" -> "png"
-        "g" -> "gif"
-        else -> "jpg"
-    }
+    val extension
+        get() = when (path) {
+            "w" -> "webp"
+            "p" -> "png"
+            "g" -> "gif"
+            else -> "jpg"
+        }
 }
 
 @Serializable
