@@ -6,13 +6,20 @@ import kotlinx.serialization.Serializable
 class NHConfig(val image_servers: List<String>, val thumb_servers: List<String>)
 
 @Serializable
-class HentaiData(val body: String)
+class ResultNHentai(val result: List<SearchHentai> = listOf(), val detail: String = "", val per_page: Long = 0)
+
+@Serializable
+class SearchHentai(
+    var id: Int,
+    val english_title: String,
+    val thumbnail: String,
+)
 
 @Serializable
 class Hentai(
     var id: Int,
     val pages: List<Image>,
-    val media_id: String,
+    val thumbnail: Image,
     val tags: List<Tag>,
     val title: Title,
     val upload_date: Long,
@@ -27,17 +34,7 @@ class Title(
 )
 
 @Serializable
-class Image(
-    val path: String,
-) {
-    val extension
-        get() = when (path) {
-            "w" -> "webp"
-            "p" -> "png"
-            "g" -> "gif"
-            else -> "jpg"
-        }
-}
+class Image(val path: String)
 
 @Serializable
 class Tag(
