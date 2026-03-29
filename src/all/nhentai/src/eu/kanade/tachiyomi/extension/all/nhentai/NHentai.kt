@@ -18,7 +18,6 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.getPreferencesLazy
@@ -31,6 +30,7 @@ import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import uy.kohesive.injekt.injectLazy
+import java.io.IOException
 
 open class NHentai(
     override val lang: String,
@@ -57,7 +57,8 @@ open class NHentai(
             .addNetworkInterceptor { chain ->
                 val response = chain.proceed(chain.request())
                 if (response.code == 401) {
-                    throw Exception("Log in via WebView to view favorites")
+                    response.close()
+                    throw IOException("Log in via WebView to view favorites")
                 }
                 response
             }
@@ -107,7 +108,8 @@ open class NHentai(
     override fun latestUpdatesParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
-        return MangasPage(mangas, hasNextPage = res.per_page > mangas.size)
+        val hasNextPage = mangas.size == res.per_page
+        return MangasPage(mangas, hasNextPage)
     }
 
     override fun latestUpdatesSelector(): String = throw UnsupportedOperationException()
@@ -124,7 +126,8 @@ open class NHentai(
     override fun popularMangaParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
-        return MangasPage(mangas, hasNextPage = res.per_page > mangas.size)
+        val hasNextPage = mangas.size == res.per_page
+        return MangasPage(mangas, hasNextPage)
     }
 
     override fun popularMangaFromElement(element: Element) = throw UnsupportedOperationException()
