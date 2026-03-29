@@ -256,13 +256,12 @@ open class NHentai(
         return SManga.create().apply {
             url = "/g/${data.id}/"
             title = if (displayFullTitle) {
-                data.english_title
+                data.english_title ?: data.japanese_title!!
             } else {
-                data.english_title.shortenTitle()
+                (data.english_title ?: data.japanese_title)!!.shortenTitle()
             }
             thumbnail_url = "$cdnUrl/${data.thumbnail}"
             status = SManga.COMPLETED
-            // Some people want these additional details in description
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
         }
     }

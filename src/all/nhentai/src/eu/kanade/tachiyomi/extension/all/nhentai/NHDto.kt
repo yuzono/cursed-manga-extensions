@@ -11,7 +11,8 @@ class ResultNHentai(val result: List<SearchHentai> = listOf(), val detail: Strin
 @Serializable
 class SearchHentai(
     var id: Int,
-    val english_title: String,
+    val english_title: String? = null,
+    val japanese_title: String? = null,
     val thumbnail: String,
 )
 
