@@ -71,7 +71,15 @@ open class NHentai(
         )
 
     val nhConfig: NHConfig by lazy {
-        client.newCall(GET("$apiUrl/config", headers)).execute().body.string().parseAs<NHConfig>()
+        try {
+            client.newCall(GET("$apiUrl/config", headers)).execute().body.string().parseAs<NHConfig>()
+        } catch (_: IOException) {
+            NHConfig(
+                (1..4).map{ n -> "https://i$n.nhentai.net"}.toList(),
+                (1..4).map{ n -> "https://i$n.nhentai.net"}.toList(),
+            )
+        }
+
     }
 
     private var displayFullTitle: Boolean = when (preferences.getString(TITLE_PREF, "full")) {
