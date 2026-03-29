@@ -224,7 +224,7 @@ open class NHentai(
         val data = response.parseAs<Hentai>()
         return listOf(
             SChapter.create().apply {
-                url = "/g/$id/"
+                url = "/g/${data.id}/"
                 name = "Chapter"
                 scanlator = getGroups(data)
                 date_upload = data.upload_date * 1000
