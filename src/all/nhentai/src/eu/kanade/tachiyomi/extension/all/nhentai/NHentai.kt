@@ -264,7 +264,6 @@ open class NHentai(
 
     private fun Document.getHentaiData(): Hentai = selectFirst(hentaiSelector)!!.data().parseAs<HentaiData>().body.parseAs()
 
-
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
