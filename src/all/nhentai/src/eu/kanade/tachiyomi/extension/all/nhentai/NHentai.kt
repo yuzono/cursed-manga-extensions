@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
 import android.content.SharedPreferences
+import android.webkit.CookieManager
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getArtists
@@ -24,6 +25,7 @@ import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -51,18 +53,37 @@ open class NHentai(
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
+    var accessToken: String = ""
     override val client: OkHttpClient by lazy {
         network.cloudflareClient.newBuilder()
             .rateLimit(4)
-            .addNetworkInterceptor { chain ->
-                val response = chain.proceed(chain.request())
-                if (response.code == 401) {
-                    response.close()
-                    throw IOException("Log in via WebView to view favorites")
-                }
-                response
-            }
+            .addNetworkInterceptor(::authorizationInterceptor)
             .build()
+    }
+
+    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
+    fun authorizationInterceptor(chain: Interceptor.Chain): Response {
+        var request = chain.request()
+        if (request.url.toString().contains("/favorites")) {
+            if (accessToken.isBlank()) {
+                val cookies = webViewCookieManager.getCookie(baseUrl)
+                if (cookies != null && cookies.isNotEmpty()) {
+                    val cookieHeaders = cookies.split("; ").toList()
+                    val tokenCookie = cookieHeaders.firstOrNull { it.startsWith("access_token=") }
+                    if (tokenCookie != null) {
+                        accessToken = tokenCookie.replace("access_token=", "")
+                    }
+                }
+            }
+            request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
+        }
+        val response = chain.proceed(request)
+        if (response.code == 401) {
+            accessToken = ""
+            response.close()
+            throw IOException("Log in via WebView to view favorites")
+        }
+        return response
     }
 
     override fun headersBuilder() = super.headersBuilder()
@@ -165,9 +186,9 @@ open class NHentai(
         val favoriteFilter = filterList.findInstance<FavoriteFilter>()
 
         if (favoriteFilter?.state == true) {
-            val offsetPage = filterList.findInstance<OffsetPageFilter>()?.state?.toIntOrNull()?.plus(page) ?: page
-            val url = "$apiUrl/favorites/".toHttpUrl().newBuilder().addQueryParameter("q", "$query $advQuery")
-                .addQueryParameter("page", offsetPage.toString())
+            val url = "$apiUrl/favorites".toHttpUrl().newBuilder()
+                .addQueryParameter("q", "$query $advQuery")
+                .addQueryParameter("page", page.toString())
 
             return GET(url.build(), headers)
         } else {
