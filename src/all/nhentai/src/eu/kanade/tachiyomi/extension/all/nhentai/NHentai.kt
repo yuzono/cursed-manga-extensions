@@ -132,6 +132,15 @@ open class NHentai(
             }
         }.also(screen::addPreference)
 
+        ListPreference(screen.context).apply {
+            key = SORT_PREF
+            title = SORT_PREF
+            entries = SORT_OPTIONS.map { it.first }.toTypedArray()
+            entryValues = SORT_OPTIONS.map { it.second }.toTypedArray()
+            summary = "%s"
+            setDefaultValue("popular")
+        }.also(screen::addPreference)
+
         screen.addRandomUAPreference()
     }
 
@@ -141,7 +150,8 @@ open class NHentai(
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
-        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+        val hasNextPage =
+            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -154,7 +164,8 @@ open class NHentai(
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
-        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+        val hasNextPage =
+            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -224,7 +235,8 @@ open class NHentai(
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
-        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+        val hasNextPage =
+            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -317,7 +329,7 @@ open class NHentai(
         PagesFilter(),
 
         Filter.Separator(),
-        SortFilter(),
+        SortFilter(SORT_OPTIONS.indexOfFirst { it.second == preferences.getString(SORT_PREF, "popular") }),
         OffsetPageFilter(),
         Filter.Header("Sort is ignored if favorites only"),
         FavoriteFilter(),
@@ -337,16 +349,11 @@ open class NHentai(
 
     private class FavoriteFilter : Filter.CheckBox("Show favorites only", false)
 
-    private class SortFilter :
+    private class SortFilter(default: Int) :
         UriPartFilter(
             "Sort By",
-            arrayOf(
-                Pair("Recent", "date"),
-                Pair("Popular: All Time", "popular"),
-                Pair("Popular: Month", "popular-month"),
-                Pair("Popular: Week", "popular-week"),
-                Pair("Popular: Today", "popular-today"),
-            ),
+            SORT_OPTIONS,
+            default,
         )
 
     private inline fun <reified T> String.parseAs(): T {
@@ -358,7 +365,12 @@ open class NHentai(
         )
     }
 
-    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray()) {
+    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>, state: Int) :
+        Filter.Select<String>(
+            displayName,
+            vals.map { it.first }.toTypedArray(),
+            state,
+        ) {
         fun toUriPart() = vals[state].second
     }
 
@@ -367,5 +379,15 @@ open class NHentai(
     companion object {
         const val PREFIX_ID_SEARCH = "id:"
         private const val TITLE_PREF = "Display manga title as:"
+
+        private val SORT_OPTIONS = arrayOf(
+            Pair("Popular: All Time", "popular"),
+            Pair("Popular: Month", "popular-month"),
+            Pair("Popular: Week", "popular-week"),
+            Pair("Popular: Today", "popular-today"),
+            Pair("Recent", "date"),
+        )
+
+        private const val SORT_PREF = "Default sort preference when searching"
     }
 }
