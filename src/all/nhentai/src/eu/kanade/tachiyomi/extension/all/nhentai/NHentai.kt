@@ -53,7 +53,9 @@ open class NHentai(
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
+    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
     var accessToken: String = ""
+
     override val client: OkHttpClient by lazy {
         network.cloudflareClient.newBuilder()
             .rateLimit(4)
@@ -61,7 +63,6 @@ open class NHentai(
             .build()
     }
 
-    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
     fun authorizationInterceptor(chain: Interceptor.Chain): Response {
         var request = chain.request()
         if (request.url.toString().contains("/favorites")) {
