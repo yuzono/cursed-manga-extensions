@@ -56,6 +56,11 @@ open class NHentai(
 
     val apiKey
         get() = preferences.getString(API_KEY, "")
+    val cookieToken
+        get() = webViewCookieManager.getCookie(baseUrl)
+            .split("; ")
+            .firstOrNull { it.startsWith("access_token=") }
+            ?.replace("access_token=", "") ?: ""
     var accessToken: String = ""
 
     override val client: OkHttpClient by lazy {
@@ -76,16 +81,8 @@ open class NHentai(
             }
             return response
         } else if (request.url.toString().contains("/favorites")) {
-            if (accessToken.isBlank()) {
-                val cookies = webViewCookieManager.getCookie(baseUrl)
-                if (cookies != null && cookies.isNotEmpty()) {
-                    val cookieHeaders = cookies.split("; ").toList()
-                    val tokenCookie = cookieHeaders.firstOrNull { it.startsWith("access_token=") }
-                    if (tokenCookie != null) {
-                        accessToken = tokenCookie.replace("access_token=", "")
-                    }
-                }
-            }
+            val newToken = cookieToken
+            if (accessToken.isBlank() || accessToken != newToken) accessToken = newToken
             request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
             val response = chain.proceed(request)
             if (response.code == 401) {
