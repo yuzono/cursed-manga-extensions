@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 class NHConfig(val image_servers: List<String>, val thumb_servers: List<String>)
 
 @Serializable
-class ResultNHentai(val result: List<SearchHentai> = listOf(), val detail: String = "", val per_page: Long = 0)
+class ResultNHentai(val result: List<SearchHentai> = listOf(), val per_page: Int = 0)
 
 @Serializable
 class SearchHentai(
