@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.all.nhentai
 
 import android.content.SharedPreferences
 import android.webkit.CookieManager
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getArtists
@@ -52,6 +53,9 @@ open class NHentai(
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
+
+    val apiKey
+        get() = preferences.getString(API_KEY, "")
     var accessToken: String = ""
 
     override val client: OkHttpClient by lazy {
@@ -63,7 +67,15 @@ open class NHentai(
 
     fun authorizationInterceptor(chain: Interceptor.Chain): Response {
         var request = chain.request()
-        if (request.url.toString().contains("/favorites")) {
+        if (!apiKey.isNullOrBlank()) {
+            request = request.newBuilder().addHeader("Authorization", "Key $apiKey").build()
+            val response = chain.proceed(request)
+            if (response.code == 401) {
+                response.close()
+                throw IOException("Invalid API key")
+            }
+            return response
+        } else if (request.url.toString().contains("/favorites")) {
             if (accessToken.isBlank()) {
                 val cookies = webViewCookieManager.getCookie(baseUrl)
                 if (cookies != null && cookies.isNotEmpty()) {
@@ -75,13 +87,16 @@ open class NHentai(
                 }
             }
             request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
+            val response = chain.proceed(request)
+            if (response.code == 401) {
+                response.close()
+                accessToken = ""
+                throw IOException("Log in via WebView or add API key in the settings to view favorites")
+            }
+            return response
         }
+
         val response = chain.proceed(request)
-        if (response.code == 401) {
-            accessToken = ""
-            response.close()
-            throw IOException("Log in via WebView to view favorites")
-        }
         return response
     }
 
@@ -140,6 +155,13 @@ open class NHentai(
             summary = "%s"
             setDefaultValue("popular")
         }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = API_KEY
+            title = "API key"
+            summary = "Profile > Settings > API Keys"
+            setDefaultValue("")
+        }.let(screen::addPreference)
 
         screen.addRandomUAPreference()
     }
@@ -377,6 +399,7 @@ open class NHentai(
     private inline fun <reified T> Iterable<*>.findInstance() = find { it is T } as? T
 
     companion object {
+        const val API_KEY = "api_key"
         const val PREFIX_ID_SEARCH = "id:"
         private const val TITLE_PREF = "Display manga title as:"
 
