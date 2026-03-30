@@ -195,7 +195,7 @@ open class NHentai(
 
             return GET(url.build(), headers)
         } else {
-            val url = "$apiUrl/search/".toHttpUrl().newBuilder()
+            val url = "$apiUrl/search".toHttpUrl().newBuilder()
                 // Blank query (Multi + sort by popular month/week/day) shows a 404 page
                 // Searching for `""` is a hacky way to return everything without any filtering
                 .addQueryParameter("query", "$query $nhLangSearch$advQuery".ifBlank { "\"\"" })
@@ -223,7 +223,7 @@ open class NHentai(
         }
     }
 
-    private fun searchMangaByIdRequest(id: String) = GET("$apiUrl/galleries/$id/", headers)
+    private fun searchMangaByIdRequest(id: String) = GET("$apiUrl/galleries/$id", headers)
 
     private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
         val details = mangaDetailsParse(response)
