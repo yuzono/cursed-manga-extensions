@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
 import android.content.SharedPreferences
+import android.webkit.CookieManager
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
@@ -14,7 +15,6 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.firstInstanceOrNull
@@ -22,6 +22,7 @@ import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -47,12 +48,41 @@ open class NHentai(
 
     private val json: Json by injectLazy()
 
+    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
+
+    private var accessToken: String = ""
+
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     override val client: OkHttpClient by lazy {
         network.cloudflareClient.newBuilder()
             .rateLimit(4)
+            .addNetworkInterceptor(::authorizationInterceptor)
             .build()
+    }
+
+    private fun authorizationInterceptor(chain: Interceptor.Chain): Response {
+        var request = chain.request()
+        if (request.url.encodedPath.contains("/favorites")) {
+            val newToken = webViewCookieManager.getCookie(baseUrl)
+                ?.split("; ")
+                ?.firstOrNull { it.startsWith("access_token=") }
+                ?.removePrefix("access_token=")
+
+            if (newToken != accessToken) {
+                accessToken = newToken.orEmpty()
+            }
+            if (accessToken.isNotBlank()) {
+                request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
+            }
+        }
+        val response = chain.proceed(request)
+        if (request.url.encodedPath.contains("/favorites") && response.code == 401) {
+            accessToken = ""
+            response.close()
+            throw IOException("Log in via WebView to view favorites")
+        }
+        return response
     }
 
     override fun headersBuilder() = super.headersBuilder()
@@ -149,7 +179,7 @@ open class NHentai(
             filterList.firstInstanceOrNull<OffsetPageFilter>()?.state?.toIntOrNull()?.plus(page) ?: page
 
         if (favoriteFilter?.state == true) {
-            val url = "$baseUrl/favorites/".toHttpUrl().newBuilder()
+            val url = "$apiUrl/favorites".toHttpUrl().newBuilder()
                 .addQueryParameter("q", "$query $advQuery")
                 .addQueryParameter("page", offsetPage.toString())
 
@@ -170,29 +200,11 @@ open class NHentai(
     }
 
     override fun searchMangaParse(response: Response): MangasPage {
-        if (response.request.url.toString().contains("/favorites") || response.request.url.toString().contains("/login")) {
-            val document = response.asJsoup()
-            if (document.select(".fa-sign-in").isNotEmpty()) {
-                throw Exception("Log in via WebView to view favorites")
-            }
-            val elements = document.select("#content .container:not(.index-popular) .gallery")
-            val mangas = elements.map { element ->
-                SManga.create().apply {
-                    setUrlWithoutDomain(element.select("a").attr("href"))
-                    val rawTitle = element.select("a > div").text().replace("\"", "")
-                    title = if (displayFullTitle) rawTitle.trim() else shortenTitle(rawTitle)
-                    val img = element.selectFirst(".cover img")!!
-                    thumbnail_url = if (img.hasAttr("data-src")) img.attr("abs:data-src") else img.attr("abs:src")
-                }
-            }
-            val hasNextPage = document.select("#content > section.pagination > a.next").isNotEmpty()
-            return MangasPage(mangas, hasNextPage)
-        }
-
         val result = response.parseAs<PaginatedResponse<GalleryListItem>>(json)
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
+
         val hasNextPage = result.numPages > page
-        return MangasPage(result.result.map { it.toSManga(displayFullTitle, ::shortenTitle, thumbServer) }, hasNextPage)
+        return MangasPage(result.result.map { it.toSManga(displayFullTitle, ::shortenTitle, getThumbServer()) }, hasNextPage)
     }
 
     private fun combineQuery(filters: FilterList): String = buildString {
@@ -215,7 +227,7 @@ open class NHentai(
     private fun searchMangaByIdRequest(id: String) = GET("$apiUrl/galleries/$id", headers)
 
     private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
-        val details = response.parseAs<Hentai>(json).toSManga(full = false, displayFullTitle, ::shortenTitle, thumbServer)
+        val details = response.parseAs<Hentai>(json).toSManga(full = false, displayFullTitle, ::shortenTitle, getThumbServer())
         return MangasPage(listOf(details), false)
     }
 
@@ -228,7 +240,7 @@ open class NHentai(
 
     override fun mangaDetailsParse(response: Response): SManga {
         val data = response.parseAs<Hentai>(json)
-        return data.toSManga(full = true, displayFullTitle, ::shortenTitle, thumbServer)
+        return data.toSManga(full = true, displayFullTitle, ::shortenTitle, getThumbServer())
     }
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl/g/${manga.url.removeSurrounding("/g/", "/")}/"
@@ -260,20 +272,15 @@ open class NHentai(
         }
     }
 
-    private val thumbServer: String by lazy {
-        nhConfig.thumbServers.random()
-    }
-
-    private val imageServer: String by lazy {
-        nhConfig.imageServers.random()
-    }
+    private fun getThumbServer(): String = nhConfig.thumbServers.random()
+    private fun getImageServer(): String = nhConfig.imageServers.random()
 
     override fun pageListParse(response: Response): List<Page> {
         val data = response.parseAs<Hentai>(json)
-        val server = imageServer
+        val imageServer = getImageServer()
 
         return data.pages.mapIndexed { i, page ->
-            Page(i, imageUrl = "$server/${page.path}")
+            Page(i, imageUrl = "$imageServer/${page.path}")
         }
     }
 
