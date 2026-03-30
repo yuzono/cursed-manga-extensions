@@ -166,7 +166,14 @@ open class NHentai(
         screen.addRandomUAPreference()
     }
 
-    override fun latestUpdatesRequest(page: Int) = GET(if (nhLang.isBlank()) "$apiUrl/galleries?page=$page" else "$apiUrl/search?query=language%3A$nhLang&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) = GET(
+        if (nhLang.isBlank()) {
+            "$apiUrl/galleries?page=$page"
+        } else {
+            "$apiUrl/search?query=language%3A$nhLang&page=$page"
+        },
+        headers,
+    )
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
@@ -178,7 +185,11 @@ open class NHentai(
     }
 
     override fun popularMangaRequest(page: Int) = GET(
-        if (nhLang.isBlank()) "$apiUrl/search/?query=\"\"&sort=popular&page=$page" else "$apiUrl/search?sort=popular&query=language%3A$nhLang&page=$page",
+        if (nhLang.isBlank()) {
+            "$apiUrl/search/?query=\"\"&sort=popular&page=$page"
+        } else {
+            "$apiUrl/search?sort=popular&query=language%3A$nhLang&page=$page"
+        },
         headers,
     )
 
@@ -214,7 +225,6 @@ open class NHentai(
             val url = "$apiUrl/favorites".toHttpUrl().newBuilder()
                 .addQueryParameter("q", "$query $advQuery")
                 .addQueryParameter("page", page.toString())
-
             return GET(url.build(), headers)
         } else {
             val url = "$apiUrl/search".toHttpUrl().newBuilder()
@@ -226,7 +236,6 @@ open class NHentai(
             filterList.findInstance<SortFilter>()?.let { f ->
                 url.addQueryParameter("sort", f.toUriPart())
             }
-
             return GET(url.build(), headers)
         }
     }
@@ -282,10 +291,7 @@ open class NHentai(
         )
     }
 
-    override fun pageListRequest(chapter: SChapter): Request {
-        val id = chapter.url.removeSurrounding("/g/", "/")
-        return GET("$apiUrl/galleries/$id", headers)
-    }
+    override fun pageListRequest(chapter: SChapter): Request = GET("$apiUrl/galleries/${chapter.url.removeSurrounding("/g/", "/")}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
         val data = response.parseAs<Hentai>(json)
@@ -294,42 +300,36 @@ open class NHentai(
         }
     }
 
-    fun parseSearchData(data: SearchHentai): SManga {
-        val cdnUrl = nhConfig.thumb_servers.random()
-        return SManga.create().apply {
-            url = "/g/${data.id}/"
-            title = if (displayFullTitle) {
-                data.english_title ?: data.japanese_title!!
-            } else {
-                (data.english_title ?: data.japanese_title)!!.shortenTitle()
-            }
-            thumbnail_url = "$cdnUrl/${data.thumbnail}"
-            status = SManga.COMPLETED
-            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+    fun parseSearchData(data: SearchHentai): SManga = SManga.create().apply {
+        url = "/g/${data.id}/"
+        title = if (displayFullTitle) {
+            data.english_title ?: data.japanese_title!!
+        } else {
+            (data.english_title ?: data.japanese_title)!!.shortenTitle()
         }
+        thumbnail_url = "$thumbServer/${data.thumbnail}"
+        status = SManga.COMPLETED
+        update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
-    fun parseData(data: Hentai): SManga {
-        val cdnUrl = nhConfig.thumb_servers.random()
-        return SManga.create().apply {
-            url = "/g/${data.id}/"
-            title = if (displayFullTitle) {
-                data.title.english ?: data.title.japanese ?: data.title.pretty!!
-            } else {
-                data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
-            }
-            thumbnail_url = "$cdnUrl/${data.thumbnail.path}"
-            status = SManga.COMPLETED
-            artist = getArtists(data)
-            author = getGroups(data) ?: getArtists(data)
-            // Some people want these additional details in description
-            description =
-                "Full English and Japanese titles:\n".plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
-                    .plus(data.title.japanese ?: "").plus("\n\n").plus("Pages: ${data.pages.size}\n")
-                    .plus("Favorited by: ${data.num_favorites}\n").plus(getTagDescription(data))
-            genre = getTags(data)
-            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+    fun parseData(data: Hentai): SManga = SManga.create().apply {
+        url = "/g/${data.id}/"
+        title = if (displayFullTitle) {
+            data.title.english ?: data.title.japanese ?: data.title.pretty!!
+        } else {
+            data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
         }
+        thumbnail_url = "$thumbServer/${data.thumbnail.path}"
+        status = SManga.COMPLETED
+        artist = getArtists(data)
+        author = getGroups(data) ?: getArtists(data)
+        // Some people want these additional details in description
+        description =
+            "Full English and Japanese titles:\n".plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
+                .plus(data.title.japanese ?: "").plus("\n\n").plus("Pages: ${data.pages.size}\n")
+                .plus("Favorited by: ${data.num_favorites}\n").plus(getTagDescription(data))
+        genre = getTags(data)
+        update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
@@ -371,28 +371,14 @@ open class NHentai(
 
     private class FavoriteFilter : Filter.CheckBox("Show favorites only", false)
 
-    private class SortFilter(default: Int) :
-        UriPartFilter(
-            "Sort By",
-            SORT_OPTIONS,
-            default,
-        )
+    private class SortFilter(default: Int) : UriPartFilter("Sort By", SORT_OPTIONS, default)
 
     private inline fun <reified T> String.parseAs(): T {
-        val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) {
-            it.groupValues[1].toInt(16).toChar().toString()
-        }
-        return json.decodeFromString(
-            data,
-        )
+        val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) { it.groupValues[1].toInt(16).toChar().toString() }
+        return json.decodeFromString(data)
     }
 
-    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>, state: Int) :
-        Filter.Select<String>(
-            displayName,
-            vals.map { it.first }.toTypedArray(),
-            state,
-        ) {
+    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>, state: Int) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
         fun toUriPart() = vals[state].second
     }
 
