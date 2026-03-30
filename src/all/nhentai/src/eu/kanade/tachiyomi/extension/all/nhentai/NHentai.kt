@@ -115,7 +115,8 @@ open class NHentai(
     override fun latestUpdatesParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
-        val hasNextPage = mangas.size == res.per_page
+        val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
+        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total < page * res.per_page)
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -133,7 +134,8 @@ open class NHentai(
     override fun popularMangaParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
-        val hasNextPage = mangas.size == res.per_page
+        val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
+        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total < page * res.per_page)
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -161,9 +163,9 @@ open class NHentai(
         val nhLangSearch = if (nhLang.isBlank()) "" else "language:$nhLang "
         val advQuery = combineQuery(filterList)
         val favoriteFilter = filterList.findInstance<FavoriteFilter>()
-        val offsetPage = filterList.findInstance<OffsetPageFilter>()?.state?.toIntOrNull()?.plus(page) ?: page
 
         if (favoriteFilter?.state == true) {
+            val offsetPage = filterList.findInstance<OffsetPageFilter>()?.state?.toIntOrNull()?.plus(page) ?: page
             val url = "$apiUrl/favorites/".toHttpUrl().newBuilder().addQueryParameter("q", "$query $advQuery")
                 .addQueryParameter("page", offsetPage.toString())
 
@@ -173,7 +175,7 @@ open class NHentai(
                 // Blank query (Multi + sort by popular month/week/day) shows a 404 page
                 // Searching for `""` is a hacky way to return everything without any filtering
                 .addQueryParameter("query", "$query $nhLangSearch$advQuery".ifBlank { "\"\"" })
-                .addQueryParameter("page", offsetPage.toString())
+                .addQueryParameter("page", page.toString())
 
             filterList.findInstance<SortFilter>()?.let { f ->
                 url.addQueryParameter("sort", f.toUriPart())
@@ -208,7 +210,9 @@ open class NHentai(
     override fun searchMangaParse(response: Response): MangasPage {
         val res = response.parseAs<ResultNHentai>()
         val mangas = res.result.map { parseSearchData(it) }
-        return MangasPage(mangas, hasNextPage = mangas.size < res.per_page)
+        val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
+        val hasNextPage = (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total < page * res.per_page)
+        return MangasPage(mangas, hasNextPage)
     }
 
     override fun searchMangaFromElement(element: Element) = throw UnsupportedOperationException()
