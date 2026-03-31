@@ -54,6 +54,20 @@ open class NHentai(
 
     private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
 
+    override val client: OkHttpClient by lazy {
+        network.cloudflareClient.newBuilder()
+            .rateLimit(4)
+            .addNetworkInterceptor(::authorizationInterceptor)
+            .build()
+    }
+
+    override fun headersBuilder() = super.headersBuilder()
+        .setRandomUserAgent(
+            filterInclude = listOf("chrome"),
+        )
+
+    // Authentication
+
     val apiKey
         get() = preferences.getString(API_KEY, "")
     val cookieToken
@@ -62,13 +76,6 @@ open class NHentai(
             .firstOrNull { it.startsWith("access_token=") }
             ?.replace("access_token=", "") ?: ""
     var accessToken: String = ""
-
-    override val client: OkHttpClient by lazy {
-        network.cloudflareClient.newBuilder()
-            .rateLimit(4)
-            .addNetworkInterceptor(::authorizationInterceptor)
-            .build()
-    }
 
     fun authorizationInterceptor(chain: Interceptor.Chain): Response {
         var request = chain.request()
@@ -97,10 +104,7 @@ open class NHentai(
         return response
     }
 
-    override fun headersBuilder() = super.headersBuilder()
-        .setRandomUserAgent(
-            filterInclude = listOf("chrome"),
-        )
+    // Cdns
 
     val nhConfig: NHConfig by lazy {
         try {
@@ -113,10 +117,12 @@ open class NHentai(
         }
     }
     val imageServer
-        get() = nhConfig.image_servers.random()
+        get() = nhConfig.imageServers.random()
 
     val thumbServer
-        get() = nhConfig.thumb_servers.random()
+        get() = nhConfig.thumbServers.random()
+
+    // Preferences
 
     private var displayFullTitle: Boolean = when (preferences.getString(TITLE_PREF, "full")) {
         "full" -> true
@@ -163,6 +169,8 @@ open class NHentai(
         screen.addRandomUAPreference()
     }
 
+    // Latest
+
     override fun latestUpdatesRequest(page: Int) = GET(
         if (nhLang.isBlank()) {
             "$apiUrl/galleries?page=$page"
@@ -173,13 +181,15 @@ open class NHentai(
     )
 
     override fun latestUpdatesParse(response: Response): MangasPage {
-        val res = response.parseAs<ResultNHentai>()
+        val res = response.parseAs<PaginatedResponse>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
         val hasNextPage =
-            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+            (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total < page * res.perPage)
         return MangasPage(mangas, hasNextPage)
     }
+
+    // Popular
 
     override fun popularMangaRequest(page: Int) = GET(
         if (nhLang.isBlank()) {
@@ -191,13 +201,15 @@ open class NHentai(
     )
 
     override fun popularMangaParse(response: Response): MangasPage {
-        val res = response.parseAs<ResultNHentai>()
+        val res = response.parseAs<PaginatedResponse>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
         val hasNextPage =
-            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+            (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total < page * res.perPage)
         return MangasPage(mangas, hasNextPage)
     }
+
+    // Search
 
     override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage = when {
         query.startsWith(PREFIX_ID_SEARCH) -> {
@@ -260,56 +272,35 @@ open class NHentai(
     }
 
     override fun searchMangaParse(response: Response): MangasPage {
-        val res = response.parseAs<ResultNHentai>()
+        val res = response.parseAs<PaginatedResponse>()
         val mangas = res.result.map { parseSearchData(it) }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
         val hasNextPage =
-            (res.num_pages != null && res.num_pages > page) || (res.num_pages == null && res.total != null && res.total < page * res.per_page)
+            (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total < page * res.perPage)
         return MangasPage(mangas, hasNextPage)
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request = searchMangaByIdRequest(manga.url.removeSurrounding("/g/", "/"))
-
-    override fun mangaDetailsParse(response: Response): SManga = parseData(response.parseAs<Hentai>())
-
-    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
-
-    override fun chapterListRequest(manga: SManga): Request = GET("$apiUrl/galleries/${manga.url.split("/")[2]}", headers)
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val data = response.parseAs<Hentai>()
-        return listOf(
-            SChapter.create().apply {
-                url = "/g/${data.id}/"
-                name = "Chapter"
-                scanlator = getGroups(data)
-                date_upload = data.upload_date * 1000
-            },
-        )
-    }
-
-    override fun pageListRequest(chapter: SChapter): Request = GET("$apiUrl/galleries/${chapter.url.removeSurrounding("/g/", "/")}", headers)
-
-    override fun pageListParse(response: Response): List<Page> {
-        val data = response.parseAs<Hentai>(json)
-        return data.pages.mapIndexed { i, page ->
-            Page(i, imageUrl = "$imageServer/${page.path}")
-        }
-    }
-
-    fun parseSearchData(data: SearchHentai): SManga = SManga.create().apply {
+    fun parseSearchData(data: GallerySearchItem): SManga = SManga.create().apply {
         url = "/g/${data.id}/"
         title = if (displayFullTitle) {
-            data.english_title ?: data.japanese_title!!
+            data.englishTitle ?: data.japaneseTitle!!
         } else {
-            (data.english_title ?: data.japanese_title)!!.shortenTitle()
+            (data.englishTitle ?: data.japaneseTitle)!!.shortenTitle()
         }
         thumbnail_url = "$thumbServer/${data.thumbnail}"
         status = SManga.COMPLETED
         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
-    fun parseData(data: Hentai): SManga = SManga.create().apply {
+    // Manga
+
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
+
+    override fun mangaDetailsRequest(manga: SManga): Request = searchMangaByIdRequest(manga.url.removeSurrounding("/g/", "/"))
+
+    override fun mangaDetailsParse(response: Response): SManga = parseMangaData(response.parseAs<Gallery>())
+
+    fun parseMangaData(data: Gallery): SManga = SManga.create().apply {
         url = "/g/${data.id}/"
         title = if (displayFullTitle) {
             data.title.english ?: data.title.japanese ?: data.title.pretty!!
@@ -324,13 +315,41 @@ open class NHentai(
         description =
             "Full English and Japanese titles:\n".plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
                 .plus(data.title.japanese ?: "").plus("\n\n").plus("Pages: ${data.pages.size}\n")
-                .plus("Favorited by: ${data.num_favorites}\n").plus(getTagDescription(data))
+                .plus("Favorited by: ${data.numFavorites}\n").plus(getTagDescription(data))
         genre = getTags(data)
         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
+    // Chapter List
+
+    override fun chapterListRequest(manga: SManga): Request = GET("$apiUrl/galleries/${manga.url.removeSurrounding("/g/", "/")}", headers)
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val data = response.parseAs<Gallery>()
+        return listOf(
+            SChapter.create().apply {
+                url = "/g/${data.id}/"
+                name = "Chapter"
+                scanlator = getGroups(data)
+                date_upload = data.uploadDate * 1000
+            },
+        )
+    }
+
+    // Pages
+
+    override fun pageListRequest(chapter: SChapter): Request = GET("$apiUrl/galleries/${chapter.url.removeSurrounding("/g/", "/")}", headers)
+
+    override fun pageListParse(response: Response): List<Page> {
+        val data = response.parseAs<Gallery>(json)
+        return data.pages.mapIndexed { i, page ->
+            Page(i, imageUrl = "$imageServer/${page.path}")
+        }
+    }
+
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
+    // Filters
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
@@ -370,15 +389,16 @@ open class NHentai(
 
     private class SortFilter(default: Int) : UriPartFilter("Sort By", SORT_OPTIONS, default)
 
-    private inline fun <reified T> String.parseAs(): T {
-        val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) { it.groupValues[1].toInt(16).toChar().toString() }
-        return json.decodeFromString(data)
-    }
-
     private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>, state: Int) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
         fun toUriPart() = vals[state].second
     }
 
+    // Utils
+
+    private inline fun <reified T> String.parseAs(): T {
+        val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) { it.groupValues[1].toInt(16).toChar().toString() }
+        return json.decodeFromString(data)
+    }
     private inline fun <reified T> Iterable<*>.findInstance() = find { it is T } as? T
 
     companion object {

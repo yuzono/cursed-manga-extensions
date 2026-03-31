@@ -1,30 +1,39 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-class NHConfig(val image_servers: List<String>, val thumb_servers: List<String>)
+class NHConfig(
+    @SerialName("image_servers") val imageServers: List<String>,
+    @SerialName("thumb_servers") val thumbServers: List<String>,
+)
 
 @Serializable
-class ResultNHentai(val result: List<SearchHentai> = listOf(), val per_page: Int = 0, val num_pages: Int?, val total: Int? = null)
+class PaginatedResponse(
+    val result: List<GallerySearchItem> = listOf(),
+    @SerialName("per_page") val perPage: Int = 0,
+    @SerialName("num_pages") val numPages: Int? = null,
+    val total: Int? = null,
+)
 
 @Serializable
-class SearchHentai(
+class GallerySearchItem(
     var id: Int,
-    val english_title: String? = null,
-    val japanese_title: String? = null,
+    @SerialName("english_title") val englishTitle: String? = null,
+    @SerialName("japanese_title") val japaneseTitle: String? = null,
     val thumbnail: String,
 )
 
 @Serializable
-class Hentai(
+class Gallery(
     var id: Int,
     val pages: List<Image>,
     val thumbnail: Image,
     val tags: List<Tag>,
     val title: Title,
-    val upload_date: Long,
-    val num_favorites: Long,
+    @SerialName("upload_date") val uploadDate: Long,
+    @SerialName("num_favorites") val numFavorites: Long,
 )
 
 @Serializable
