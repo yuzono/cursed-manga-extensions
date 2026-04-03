@@ -114,7 +114,7 @@ open class NHentai(
     val nhConfig: NHConfig by lazy {
         try {
             client.newCall(GET("$apiUrl/config", headers)).execute().parseAs<NHConfig>(json)
-        } catch (_: IOException) {
+        } catch (_: Exception) {
             NHConfig(
                 (1..4).map { n -> "https://i$n.nhentai.net" }.toList(),
                 (1..4).map { n -> "https://t$n.nhentai.net" }.toList(),
@@ -363,7 +363,7 @@ open class NHentai(
         PagesFilter(),
 
         Filter.Separator(),
-        SortFilter(SORT_OPTIONS.indexOfFirst { it.second == preferences.getString(SORT_PREF, "popular") }),
+        SortFilter(SORT_OPTIONS.indexOfFirst { it.second == preferences.getString(SORT_PREF, "popular") }.coerceAtLeast(0)),
         OffsetPageFilter(),
         Filter.Header("Sort is ignored if favorites only"),
         FavoriteFilter(),
