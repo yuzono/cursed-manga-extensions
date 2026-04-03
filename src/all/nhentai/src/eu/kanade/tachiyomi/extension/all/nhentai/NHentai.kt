@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getGroups
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTagDescription
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTags
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
@@ -206,11 +207,11 @@ open class NHentai(
     override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage = when {
         query.startsWith(PREFIX_ID_SEARCH) -> {
             val id = query.removePrefix(PREFIX_ID_SEARCH)
-            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(id)).execute())
+            client.newCall(searchMangaByIdRequest(id)).await().use { searchMangaByIdParse(it) }
         }
 
         query.toIntOrNull() != null -> {
-            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(query)).execute())
+            client.newCall(searchMangaByIdRequest(query)).await().use { searchMangaByIdParse(it) }
         }
 
         else -> super.getSearchManga(page, query, filters)
