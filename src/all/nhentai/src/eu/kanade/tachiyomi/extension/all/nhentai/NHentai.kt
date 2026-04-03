@@ -74,8 +74,8 @@ open class NHentai(
         get() = preferences.getString(API_KEY, "")
     val cookieToken
         get() = webViewCookieManager.getCookie(baseUrl)
-            .split("; ")
-            .firstOrNull { it.startsWith("access_token=") }
+            ?.split("; ")
+            ?.firstOrNull { it.startsWith("access_token=") }
             ?.replace("access_token=", "") ?: ""
     var accessToken: String = ""
 
