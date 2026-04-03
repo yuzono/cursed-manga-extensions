@@ -221,18 +221,20 @@ open class NHentai(
         val nhLangSearch = if (nhLang.isBlank()) "" else "language:$nhLang "
         val advQuery = combineQuery(filterList)
         val favoriteFilter = filterList.firstInstanceOrNull<FavoriteFilter>()
+        val offsetPage =
+            filterList.firstInstanceOrNull<OffsetPageFilter>()?.state?.toIntOrNull()?.plus(page) ?: page
 
         if (favoriteFilter?.state == true) {
             val url = "$apiUrl/favorites".toHttpUrl().newBuilder()
                 .addQueryParameter("q", "$query $advQuery")
-                .addQueryParameter("page", page.toString())
+                .addQueryParameter("page", offsetPage.toString())
             return GET(url.build(), headers)
         } else {
             val url = "$apiUrl/search".toHttpUrl().newBuilder()
                 // Blank query (Multi + sort by popular month/week/day) shows a 404 page
                 // Searching for `""` is a hacky way to return everything without any filtering
                 .addQueryParameter("query", "$query $nhLangSearch$advQuery".ifBlank { "\"\"" })
-                .addQueryParameter("page", page.toString())
+                .addQueryParameter("page", offsetPage.toString())
 
             filterList.firstInstanceOrNull<SortFilter>()?.let { f ->
                 url.addQueryParameter("sort", f.toUriPart())
