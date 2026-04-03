@@ -267,7 +267,7 @@ open class NHentai(
 
     override fun searchMangaParse(response: Response): MangasPage {
         val res = response.parseAs<PaginatedResponse<GalleryItem>>(json)
-        val mangas = res.result.map { parseSearchData(it) }
+        val mangas = res.result.mapNotNull { runCatching { parseSearchData(it) }.getOrNull() }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
         val hasNextPage =
             (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total < page * res.perPage)
@@ -276,10 +276,8 @@ open class NHentai(
 
     fun parseSearchData(data: GalleryItem): SManga = SManga.create().apply {
         url = "/g/${data.id}/"
-        title = if (displayFullTitle) {
-            data.englishTitle ?: data.japaneseTitle!!
-        } else {
-            (data.englishTitle ?: data.japaneseTitle)!!.shortenTitle()
+        title = (data.englishTitle ?: data.japaneseTitle)!!.let {
+            if (displayFullTitle) it else it.shortenTitle()
         }
         thumbnail_url = "$thumbServer/${data.thumbnail}"
         status = SManga.COMPLETED
