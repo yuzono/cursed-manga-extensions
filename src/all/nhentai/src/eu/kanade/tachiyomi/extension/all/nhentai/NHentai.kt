@@ -243,15 +243,18 @@ open class NHentai(
 
     private fun combineQuery(filters: FilterList): String = buildString {
         filters.filterIsInstance<AdvSearchEntryFilter>().forEach { filter ->
-            filter.state.split(",").map(String::trim).filterNot(String::isBlank).forEach { tag ->
-                val y = !(filter.name == "Pages" || filter.name == "Uploaded")
-                if (tag.startsWith("-")) append("-")
-                append(filter.name, ':')
-                if (y) append('"')
-                append(tag.removePrefix("-"))
-                if (y) append('"')
-                append(" ")
-            }
+            filter.state.split(",")
+                .map(String::trim)
+                .filterNot(String::isBlank)
+                .forEach { tag ->
+                    val y = !(filter.name == "Pages" || filter.name == "Uploaded")
+                    if (tag.startsWith("-")) append("-")
+                    append(filter.name, ':')
+                    if (y) append('"')
+                    append(tag.removePrefix("-"))
+                    if (y) append('"')
+                    append(" ")
+                }
         }
     }
 
@@ -289,29 +292,32 @@ open class NHentai(
 
     override fun mangaDetailsRequest(manga: SManga): Request = searchMangaByIdRequest(manga.url.removeSurrounding("/g/", "/"))
 
-    override fun mangaDetailsParse(response: Response): SManga = parseMangaData(response.parseAs<Hentai>(json))
+    override fun mangaDetailsParse(response: Response): SManga {
+        val data = response.parseAs<Hentai>(json)
 
-    fun parseMangaData(data: Hentai): SManga = SManga.create().apply {
-        url = "/g/${data.id}/"
-        title = if (displayFullTitle) {
-            data.title.english ?: data.title.japanese ?: data.title.pretty!!
-        } else {
-            data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
+        return SManga.create().apply {
+            url = "/g/${data.id}/"
+            title = if (displayFullTitle) {
+                data.title.english ?: data.title.japanese ?: data.title.pretty!!
+            } else {
+                data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
+            }
+            thumbnail_url = "$thumbServer/${data.thumbnail.path}"
+            status = SManga.COMPLETED
+            artist = getArtists(data)
+            author = getGroups(data) ?: getArtists(data)
+            // Some people want these additional details in description
+            description = "Full English and Japanese titles:\n"
+                .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
+                .plus(data.title.japanese ?: "")
+                .plus("\n\n")
+                .plus("Pages: ${data.numPages}\n")
+                .plus("Favorited by: ${data.numFavorites}\n")
+                .plus(getTagDescription(data))
+            genre = getTags(data)
+            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+            initialized = true
         }
-        thumbnail_url = "$thumbServer/${data.thumbnail.path}"
-        status = SManga.COMPLETED
-        artist = getArtists(data)
-        author = getGroups(data) ?: getArtists(data)
-        // Some people want these additional details in description
-        description = "Full English and Japanese titles:\n"
-            .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
-            .plus(data.title.japanese ?: "")
-            .plus("\n\n")
-            .plus("Pages: ${data.numPages}\n")
-            .plus("Favorited by: ${data.numFavorites}\n")
-            .plus(getTagDescription(data))
-        genre = getTags(data)
-        update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
     // Chapter List
@@ -378,7 +384,11 @@ open class NHentai(
 
     private class SortFilter(default: Int) : UriPartFilter("Sort By", SORT_OPTIONS, default)
 
-    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>, state: Int) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
+    private open class UriPartFilter(
+        displayName: String,
+        val vals: Array<Pair<String, String>>,
+        state: Int,
+    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
         fun toUriPart() = vals[state].second
     }
 
