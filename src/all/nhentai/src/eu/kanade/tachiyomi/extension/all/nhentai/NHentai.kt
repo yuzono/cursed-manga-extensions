@@ -273,7 +273,7 @@ open class NHentai(
         val mangas = res.result.mapNotNull { runCatching { parseSearchData(it) }.getOrNull() }
         val page = response.request.url.queryParameter("page")?.toIntOrNull() ?: 1
         val hasNextPage =
-            (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total < page * res.perPage)
+            (res.numPages != null && res.numPages > page) || (res.numPages == null && res.total != null && res.total > page * res.perPage)
         return MangasPage(mangas, hasNextPage)
     }
 
