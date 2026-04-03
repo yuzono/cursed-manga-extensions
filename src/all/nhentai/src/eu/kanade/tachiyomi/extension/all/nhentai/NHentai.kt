@@ -206,11 +206,11 @@ open class NHentai(
     override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage = when {
         query.startsWith(PREFIX_ID_SEARCH) -> {
             val id = query.removePrefix(PREFIX_ID_SEARCH)
-            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(id)).execute(), id)
+            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(id)).execute())
         }
 
         query.toIntOrNull() != null -> {
-            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(query)).execute(), query)
+            searchMangaByIdParse(client.newCall(searchMangaByIdRequest(query)).execute())
         }
 
         else -> super.getSearchManga(page, query, filters)
@@ -257,9 +257,8 @@ open class NHentai(
 
     private fun searchMangaByIdRequest(id: String) = GET("$apiUrl/galleries/$id", headers)
 
-    private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
+    private fun searchMangaByIdParse(response: Response): MangasPage {
         val details = mangaDetailsParse(response)
-        details.url = "/g/$id/"
         return MangasPage(listOf(details), false)
     }
 
