@@ -291,7 +291,6 @@ open class NHentai(
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
-        Filter.Header("Add quote (\"...\") for exact match"),
         TagFilter(),
         CategoryFilter(),
         GroupFilter(),
