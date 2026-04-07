@@ -1,8 +1,8 @@
 <div align="center">
 
-| Install to app | Up to date | Build | Discord |
-|:--------------:|:----------:|:-----:|:-------:|
-| [![Install](https://img.shields.io/badge/Click%20here%20to%20install%20repo-gray?style=flat&labelColor=red)](https://intradeus.github.io/http-protocol-redirector/?r=tachiyomi://add-repo?url=https://raw.githubusercontent.com/yuzono/cursed-manga-repo/repo/index.min.json) | [![Updated](https://img.shields.io/github/actions/workflow/status/yuzono/cursed-manga-extensions/auto_cherry_pick.yml?label=Updated&labelColor=27303D)](https://github.com/yuzono/cursed-manga-extensions/actions/workflows/auto_cherry_pick.yml) | [![Build](https://github.com/yuzono/cursed-manga-extensions/actions/workflows/build_push.yml/badge.svg)](https://github.com/yuzono/cursed-manga-extensions/actions/workflows/build_push.yml) | [![Discord](https://img.shields.io/discord/1377136877491982366.svg?label=&labelColor=6A7EC2&color=7389D8&logo=discord&logoColor=FFFFFF)](https://discord.gg/85MZhUX688) |
+| Install to app | Build | Discord |
+|:--------------:|:-----:|:-------:|
+| [![Install](https://img.shields.io/badge/Click%20here%20to%20install%20repo-gray?style=flat&labelColor=red)](https://intradeus.github.io/http-protocol-redirector/?r=tachiyomi://add-repo?url=https://raw.githubusercontent.com/yuzono/cursed-manga-repo/repo/index.min.json) | [![Build](https://github.com/yuzono/cursed-manga-extensions/actions/workflows/build_push.yml/badge.svg)](https://github.com/yuzono/cursed-manga-extensions/actions/workflows/build_push.yml) | [![Discord](https://img.shields.io/discord/1377136877491982366.svg?label=&labelColor=6A7EC2&color=7389D8&logo=discord&logoColor=FFFFFF)](https://discord.gg/85MZhUX688) |
 
 [![Sponsor me on GitHub](https://custom-icon-badges.demolab.com/badge/-Sponsor-ea4aaa?style=for-the-badge&logo=heart&logoColor=white)](https://github.com/sponsors/cuong-tran "Sponsor me on GitHub")
 
@@ -13,10 +13,6 @@
 
 This repository contains extension catalogues which are compatible with [Komikku](https://github.com/komikku-app/komikku) and Mihon / Tachiyomi or other forks.
 
-This repository automatically merges any updates from [Keiyoushi](https://github.com/keiyoushi/extensions-source) every 6 hours to have the best of community contributions. Beside from that, it has a few of my developed extensions or some improvements. Enjoy!
-
-Some extensions from this repo provide better support for Komikku's `Suggestions` feature.
-
 ## Recommend App
 
 ### [Komikku](https://github.com/komikku-app/komikku)
@@ -25,9 +21,9 @@ Some extensions from this repo provide better support for Komikku's `Suggestions
 
 ## How to add the repo
 
-**If you are new to repository/extensions, please read the [Yūzōnō Getting Started guide](https://yuzono.github.io/docs/guides/getting-started#adding-the-extension-repo) first.**
+**Extensions list:** [Yūzōnō's cursed manga](https://yuzono.github.io/cursed-manga-repo/extensions/)
 
-* You can add our repo by visiting the [Yūzōnō Website](https://yuzono.github.io/add-repo)
+* You can add our repo by visiting the [Yūzōnō Website](https://yuzono.github.io/cursed-manga-repo/)
 * Otherwise, copy & paste the following URL:
 
 ```html
