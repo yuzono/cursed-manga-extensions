@@ -62,6 +62,8 @@ open class NHentai(
     override val client: OkHttpClient by lazy {
         network.cloudflareClient.newBuilder()
             .rateLimit(4)
+            // TachiyomiSY 1.12.0 still expects the legacy `window._gallery = JSON.parse(...)` payload
+            // in its delegated NHentai metadata parser, even though the site now returns API JSON.
             .addInterceptor(::galleryDetailsCompatInterceptor)
             .addNetworkInterceptor(::authorizationInterceptor)
             .build()
@@ -123,53 +125,18 @@ open class NHentai(
             .removeHeader(DETAILS_COMPAT_HEADER)
             .build()
 
-        return try {
-            val apiResponse = chain.proceed(cleanRequest)
+        return chain.proceed(cleanRequest).use { apiResponse ->
+            val contentType = apiResponse.body.contentType()
             val apiBody = apiResponse.body.string()
-            val data = apiBody.parseAs<Hentai>(json)
-            val compatPayload = CompatGalleryResponse(
-                id = data.id,
-                mediaId = data.mediaId,
-                title = data.title,
-                images = CompatImages(
-                    pages = data.pages.map { page ->
-                        CompatImage(
-                            type = pathToLegacyType(page.path),
-                            width = page.width,
-                            height = page.height,
-                        )
-                    },
-                    cover = CompatImage(
-                        type = pathToLegacyType(data.cover?.path),
-                        width = data.cover?.width,
-                        height = data.cover?.height,
-                    ),
-                    thumbnail = CompatImage(
-                        type = pathToLegacyType(data.thumbnail?.path),
-                        width = data.thumbnail?.width,
-                        height = data.thumbnail?.height,
-                    ),
-                ),
-                scanlator = data.scanlator.nullIfBlank(),
-                uploadDate = data.toSChapter().date_upload / 1000,
-                tags = data.tags,
-                numPages = data.numPages.takeIf { it > 0 } ?: data.pages.size,
-                numFavorites = data.numFavorites,
-            )
-            val compatJson = json.encodeToString(compatPayload)
-            val escapedBody = compatJson
-                .replace("\\", "\\u005c")
-                .replace("\"", "\\u0022")
-                .replace("\n", "\\u000a")
-                .replace("\r", "\\u000d")
-                .replace("\t", "\\u0009")
-            val legacyBody = """window._gallery = JSON.parse("$escapedBody");"""
+            val responseBody = if (apiResponse.isSuccessful) {
+                buildCompatGalleryBody(apiBody)
+            } else {
+                apiBody
+            }
             apiResponse.newBuilder()
                 .request(cleanRequest)
-                .body(legacyBody.toResponseBody(apiResponse.body.contentType()))
+                .body(responseBody.toResponseBody(contentType))
                 .build()
-        } catch (e: Exception) {
-            chain.proceed(cleanRequest)
         }
     }
 
@@ -200,11 +167,51 @@ open class NHentai(
     }
 
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
-    private val galleryJsonRegex = Regex(""".parse\("(.*)"\);""")
+    private val galleryJsonRegex = Regex(""".parse\("(.*?)"\);""", setOf(RegexOption.DOT_MATCHES_ALL))
     private val unicodeEscapeRegex = Regex("""\\u([0-9a-fA-F]{4})""")
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
     private fun String?.nullIfBlank() = this?.trim()?.takeIf { it.isNotEmpty() }
     private fun fallbackTitle(id: Int) = "Gallery #$id"
+    private fun buildCompatGalleryBody(apiBody: String): String {
+        val data = apiBody.parseAs<Hentai>(json)
+        val compatPayload = CompatGalleryResponse(
+            id = data.id,
+            mediaId = data.mediaId,
+            title = data.title,
+            images = CompatImages(
+                pages = data.pages.map { page ->
+                    CompatImage(
+                        type = pathToLegacyType(page.path),
+                        width = page.width,
+                        height = page.height,
+                    )
+                },
+                cover = CompatImage(
+                    type = pathToLegacyType(data.cover?.path),
+                    width = data.cover?.width,
+                    height = data.cover?.height,
+                ),
+                thumbnail = CompatImage(
+                    type = pathToLegacyType(data.thumbnail?.path),
+                    width = data.thumbnail?.width,
+                    height = data.thumbnail?.height,
+                ),
+            ),
+            scanlator = data.scanlator.nullIfBlank(),
+            uploadDate = data.toSChapter().date_upload / 1000,
+            tags = data.tags,
+            numPages = data.numPages.takeIf { it > 0 } ?: data.pages.size,
+            numFavorites = data.numFavorites,
+        )
+        val compatJson = json.encodeToString(compatPayload)
+        val escapedBody = compatJson
+            .replace("\\", "\\u005c")
+            .replace("\"", "\\u0022")
+            .replace("\n", "\\u000a")
+            .replace("\r", "\\u000d")
+            .replace("\t", "\\u0009")
+        return """window._gallery = JSON.parse("$escapedBody");"""
+    }
     private fun String.decodeHtmlGalleryJson(): String {
         val galleryJson = galleryJsonRegex.find(this)?.groupValues?.getOrNull(1)
             ?: throw IOException("Unable to locate embedded gallery JSON")
@@ -448,25 +455,13 @@ open class NHentai(
             ?: englishTitle?.shortenTitle()
             ?: japaneseTitle?.shortenTitle()
             ?: fullTitle
-        val artists = getArtists(
-            Hentai(
-                id = data.id,
-                tags = data.tags,
-                title = data.title,
-            ),
-        )
-        val groups = getGroups(
-            Hentai(
-                id = data.id,
-                tags = data.tags,
-                title = data.title,
-            ),
-        )
         val tagData = Hentai(
             id = data.id,
             tags = data.tags,
             title = data.title,
         )
+        val artists = getArtists(tagData)
+        val groups = getGroups(tagData)
         val thumbnailPath = data.thumbnailPath ?: data.coverPath
 
         return SManga.create().apply {
@@ -513,9 +508,11 @@ open class NHentai(
 
     override fun pageListParse(response: Response): List<Page> {
         val data = response.parseAs<Hentai>(json)
-        return data.pages.mapIndexedNotNull { i, page ->
-            page.path?.let { Page(i, imageUrl = "$imageServer/$it") }
-        }
+        return data.pages
+            .mapNotNull { it.path }
+            .mapIndexed { i, path ->
+                Page(i, imageUrl = "$imageServer/$path")
+            }
     }
 
     override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
