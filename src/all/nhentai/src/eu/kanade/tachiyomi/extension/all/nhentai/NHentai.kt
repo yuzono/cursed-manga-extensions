@@ -26,12 +26,14 @@ import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import uy.kohesive.injekt.injectLazy
 import java.io.IOException
 
@@ -60,6 +62,7 @@ open class NHentai(
     override val client: OkHttpClient by lazy {
         network.cloudflareClient.newBuilder()
             .rateLimit(4)
+            .addInterceptor(::galleryDetailsCompatInterceptor)
             .addNetworkInterceptor(::authorizationInterceptor)
             .build()
     }
@@ -109,6 +112,67 @@ open class NHentai(
         return response
     }
 
+    private fun galleryDetailsCompatInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val requiresCompatBody = request.header(DETAILS_COMPAT_HEADER) == "1"
+        if (!requiresCompatBody) {
+            return chain.proceed(request)
+        }
+
+        val cleanRequest = request.newBuilder()
+            .removeHeader(DETAILS_COMPAT_HEADER)
+            .build()
+
+        return try {
+            val apiResponse = chain.proceed(cleanRequest)
+            val apiBody = apiResponse.body.string()
+            val data = apiBody.parseAs<Hentai>(json)
+            val compatPayload = CompatGalleryResponse(
+                id = data.id,
+                mediaId = data.mediaId,
+                title = data.title,
+                images = CompatImages(
+                    pages = data.pages.map { page ->
+                        CompatImage(
+                            type = pathToLegacyType(page.path),
+                            width = page.width,
+                            height = page.height,
+                        )
+                    },
+                    cover = CompatImage(
+                        type = pathToLegacyType(data.cover?.path),
+                        width = data.cover?.width,
+                        height = data.cover?.height,
+                    ),
+                    thumbnail = CompatImage(
+                        type = pathToLegacyType(data.thumbnail?.path),
+                        width = data.thumbnail?.width,
+                        height = data.thumbnail?.height,
+                    ),
+                ),
+                scanlator = data.scanlator.nullIfBlank(),
+                uploadDate = data.toSChapter().date_upload / 1000,
+                tags = data.tags,
+                numPages = data.numPages.takeIf { it > 0 } ?: data.pages.size,
+                numFavorites = data.numFavorites,
+            )
+            val compatJson = json.encodeToString(compatPayload)
+            val escapedBody = compatJson
+                .replace("\\", "\\u005c")
+                .replace("\"", "\\u0022")
+                .replace("\n", "\\u000a")
+                .replace("\r", "\\u000d")
+                .replace("\t", "\\u0009")
+            val legacyBody = """window._gallery = JSON.parse("$escapedBody");"""
+            apiResponse.newBuilder()
+                .request(cleanRequest)
+                .body(legacyBody.toResponseBody(apiResponse.body.contentType()))
+                .build()
+        } catch (e: Exception) {
+            chain.proceed(cleanRequest)
+        }
+    }
+
     // Cdns
 
     val nhConfig: NHConfig by lazy {
@@ -136,7 +200,74 @@ open class NHentai(
     }
 
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
+    private val galleryJsonRegex = Regex(""".parse\("(.*)"\);""")
+    private val unicodeEscapeRegex = Regex("""\\u([0-9a-fA-F]{4})""")
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
+    private fun String?.nullIfBlank() = this?.trim()?.takeIf { it.isNotEmpty() }
+    private fun fallbackTitle(id: Int) = "Gallery #$id"
+    private fun String.decodeHtmlGalleryJson(): String {
+        val galleryJson = galleryJsonRegex.find(this)?.groupValues?.getOrNull(1)
+            ?: throw IOException("Unable to locate embedded gallery JSON")
+        return galleryJson.replace(unicodeEscapeRegex) {
+            it.groupValues[1].toInt(radix = 16).toChar().toString()
+        }
+    }
+    private fun pathToLegacyType(path: String?): String? = when (path?.substringAfterLast('.', "")) {
+        "webp" -> "w"
+        "png" -> "p"
+        "jpg", "jpeg" -> "j"
+        "gif" -> "g"
+        else -> null
+    }
+    private fun legacyThumbUrl(mediaId: String?, image: Image?, fileName: String): String? {
+        val extension = when (image?.type) {
+            "w" -> "webp"
+            "p" -> "png"
+            "j" -> "jpg"
+            "g" -> "gif"
+            else -> null
+        }
+        return if (mediaId != null && extension != null) {
+            "$thumbServer/galleries/$mediaId/$fileName.$extension"
+        } else {
+            null
+        }
+    }
+    private data class ParsedHentai(
+        val id: Int,
+        val title: Title,
+        val tags: List<Tag>,
+        val numPages: Int,
+        val numFavorites: Long,
+        val thumbnailPath: String? = null,
+        val coverPath: String? = null,
+    )
+    private fun parseGalleryBody(body: String): ParsedHentai {
+        val trimmed = body.trimStart()
+        return if (trimmed.startsWith("{")) {
+            val data = trimmed.parseAs<Hentai>(json)
+            ParsedHentai(
+                id = data.id,
+                title = data.title,
+                tags = data.tags,
+                numPages = data.numPages.takeIf { it > 0 } ?: data.pages.size,
+                numFavorites = data.numFavorites,
+                thumbnailPath = data.thumbnail?.path,
+                coverPath = data.cover?.path,
+            )
+        } else {
+            val data = body.decodeHtmlGalleryJson().parseAs<LegacyHentai>(json)
+            ParsedHentai(
+                id = data.id,
+                title = data.title,
+                tags = data.tags,
+                numPages = data.images.pages.size,
+                numFavorites = data.numFavorites,
+                thumbnailPath = legacyThumbUrl(data.mediaId, data.images.thumbnail, "thumb"),
+                coverPath = legacyThumbUrl(data.mediaId, data.images.cover, "cover"),
+            )
+        }
+    }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
@@ -278,11 +409,16 @@ open class NHentai(
     }
 
     fun parseSearchData(data: GalleryItem): SManga = SManga.create().apply {
+        val englishTitle = data.englishTitle.nullIfBlank()
+        val japaneseTitle = data.japaneseTitle.nullIfBlank()
+        val fullTitle = englishTitle ?: japaneseTitle ?: fallbackTitle(data.id)
+        val shortTitle = englishTitle?.shortenTitle()
+            ?: japaneseTitle?.shortenTitle()
+            ?: fullTitle
+
         url = "/g/${data.id}/"
-        title = (data.englishTitle ?: data.japaneseTitle)!!.let {
-            if (displayFullTitle) it else it.shortenTitle()
-        }
-        thumbnail_url = "$thumbServer/${data.thumbnail}"
+        title = if (displayFullTitle) fullTitle else shortTitle
+        thumbnail_url = data.thumbnail?.let { "$thumbServer/$it" }
         status = SManga.COMPLETED
         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
@@ -291,31 +427,69 @@ open class NHentai(
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
-    override fun mangaDetailsRequest(manga: SManga): Request = searchMangaByIdRequest(manga.url.removeSurrounding("/g/", "/"))
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val id = manga.url.removeSurrounding("/g/", "/")
+        val requestUrl = "$apiUrl/galleries/$id"
+        return GET(
+            requestUrl,
+            headersBuilder()
+                .add(DETAILS_COMPAT_HEADER, "1")
+                .build(),
+        )
+    }
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val data = response.parseAs<Hentai>(json)
+        val data = response.use { parseGalleryBody(it.body.string()) }
+        val englishTitle = data.title.english.nullIfBlank()
+        val japaneseTitle = data.title.japanese.nullIfBlank()
+        val prettyTitle = data.title.pretty.nullIfBlank()
+        val fullTitle = englishTitle ?: japaneseTitle ?: prettyTitle ?: fallbackTitle(data.id)
+        val shortTitle = prettyTitle
+            ?: englishTitle?.shortenTitle()
+            ?: japaneseTitle?.shortenTitle()
+            ?: fullTitle
+        val artists = getArtists(
+            Hentai(
+                id = data.id,
+                tags = data.tags,
+                title = data.title,
+            ),
+        )
+        val groups = getGroups(
+            Hentai(
+                id = data.id,
+                tags = data.tags,
+                title = data.title,
+            ),
+        )
+        val tagData = Hentai(
+            id = data.id,
+            tags = data.tags,
+            title = data.title,
+        )
+        val thumbnailPath = data.thumbnailPath ?: data.coverPath
 
         return SManga.create().apply {
             url = "/g/${data.id}/"
-            title = if (displayFullTitle) {
-                data.title.english ?: data.title.japanese ?: data.title.pretty!!
-            } else {
-                data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
+            title = if (displayFullTitle) fullTitle else shortTitle
+            thumbnail_url = thumbnailPath?.let {
+                if (it.startsWith("http")) it else "$thumbServer/$it"
             }
-            thumbnail_url = "$thumbServer/${data.thumbnail.path}"
             status = SManga.COMPLETED
-            artist = getArtists(data)
-            author = getGroups(data) ?: getArtists(data)
-            // Some people want these additional details in description
-            description = "Full English and Japanese titles:\n"
-                .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
-                .plus(data.title.japanese ?: "")
-                .plus("\n\n")
-                .plus("Pages: ${data.numPages}\n")
-                .plus("Favorited by: ${data.numFavorites}\n")
-                .plus(getTagDescription(data))
-            genre = getTags(data)
+            artist = artists
+            author = groups ?: artists
+            description = buildString {
+                append("Full English and Japanese titles:\n")
+                appendLine(fullTitle)
+                japaneseTitle
+                    ?.takeUnless { it == fullTitle }
+                    ?.let(::appendLine)
+                appendLine()
+                append("Pages: ${data.numPages}\n")
+                append("Favorited by: ${data.numFavorites}\n")
+                append(getTagDescription(tagData))
+            }
+            genre = getTags(tagData)
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
             initialized = true
         }
@@ -323,7 +497,7 @@ open class NHentai(
 
     // Chapter List
 
-    override fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+    override fun chapterListRequest(manga: SManga): Request = searchMangaByIdRequest(manga.url.removeSurrounding("/g/", "/"))
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val data = response.parseAs<Hentai>(json)
@@ -339,8 +513,8 @@ open class NHentai(
 
     override fun pageListParse(response: Response): List<Page> {
         val data = response.parseAs<Hentai>(json)
-        return data.pages.mapIndexed { i, page ->
-            Page(i, imageUrl = "$imageServer/${page.path}")
+        return data.pages.mapIndexedNotNull { i, page ->
+            page.path?.let { Page(i, imageUrl = "$imageServer/$it") }
         }
     }
 
@@ -396,6 +570,7 @@ open class NHentai(
     companion object {
         const val API_KEY = "api_key"
         const val PREFIX_ID_SEARCH = "id:"
+        private const val DETAILS_COMPAT_HEADER = "X-NHentai-Compat-Details"
         private const val TITLE_PREF = "Display manga title as:"
 
         private val SORT_OPTIONS = arrayOf(
