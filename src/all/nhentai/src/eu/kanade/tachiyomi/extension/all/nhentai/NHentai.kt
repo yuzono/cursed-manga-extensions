@@ -1,7 +1,9 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
+import android.app.Application
 import android.content.SharedPreferences
 import android.webkit.CookieManager
+import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
@@ -11,7 +13,7 @@ import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTagDescription
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTags
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.await
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -27,13 +29,19 @@ import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import kotlinx.serialization.json.Json
+import okhttp3.Cache
+import okhttp3.CacheControl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 open class NHentai(
     override val lang: String,
@@ -58,9 +66,26 @@ open class NHentai(
     private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
 
     override val client: OkHttpClient by lazy {
+        val (permits, period) = preferences.parseRateLimit()
+
+        val app = Injekt.get<Application>()
+        val cacheParent = app.cacheDir
+            .takeIf { it.exists() || it.mkdirs() }
+            ?: app.externalCacheDir
+            ?: app.filesDir
+        val cacheDirectory = File(cacheParent, "nhentai_api_cache_$lang")
+
         network.cloudflareClient.newBuilder()
-            .rateLimit(4)
-            .addNetworkInterceptor(::authorizationInterceptor)
+            .rateLimitHost(baseUrl.toHttpUrl(), permits, period, TimeUnit.SECONDS)
+            .cache(
+                Cache(
+                    directory = cacheDirectory,
+                    maxSize = 5L * 1024 * 1024, // 5 MiB which should be enough
+                ),
+            )
+            .addNetworkInterceptor(NhGalleryCacheInterceptor())
+            .addNetworkInterceptor(NhApiRetryInterceptor())
+            .addNetworkInterceptor(NhAuthorizationInterceptor())
             .build()
     }
 
@@ -79,35 +104,6 @@ open class NHentai(
             ?.firstOrNull { it.startsWith("access_token=") }
             ?.replace("access_token=", "") ?: ""
     var accessToken: String = ""
-
-    fun authorizationInterceptor(chain: Interceptor.Chain): Response {
-        var request = chain.request()
-        if (!apiKey.isNullOrBlank()) {
-            request = request.newBuilder().addHeader("Authorization", "Key $apiKey").build()
-            val response = chain.proceed(request)
-            if (response.code == 401) {
-                response.close()
-                throw IOException("Invalid API key")
-            }
-            return response
-        } else if (request.url.toString().contains("/favorites")) {
-            val newToken = cookieToken
-            if (accessToken != newToken) accessToken = newToken
-            if (accessToken.isNotBlank()) {
-                request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
-            }
-            val response = chain.proceed(request)
-            if (response.code == 401) {
-                response.close()
-                accessToken = ""
-                throw IOException("Log in via WebView or add API key in the settings to view favorites")
-            }
-            return response
-        }
-
-        val response = chain.proceed(request)
-        return response
-    }
 
     // Cdns
 
@@ -173,6 +169,19 @@ open class NHentai(
         }.let(screen::addPreference)
 
         screen.addRandomUAPreference()
+
+        ListPreference(screen.context).apply {
+            key = RATE_LIMIT_PREF
+            title = "Library Update Request Rate"
+            summary = "%s"
+            entries = RATE_LIMIT_OPTIONS.map { it.first }.toTypedArray()
+            entryValues = RATE_LIMIT_OPTIONS.map { it.second }.toTypedArray()
+            setDefaultValue(RATE_LIMIT_DEFAULT)
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, "Restart app to apply", Toast.LENGTH_LONG).show()
+                true
+            }
+        }.also(screen::addPreference)
     }
 
     // Latest
@@ -323,7 +332,14 @@ open class NHentai(
 
     // Chapter List
 
-    override fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+    override fun chapterListRequest(manga: SManga): Request {
+        val id = manga.url.removeSurrounding("/g/", "/")
+        return GET(
+            "$apiUrl/galleries/$id",
+            headers,
+            CacheControl.Builder().maxStale(2, TimeUnit.HOURS).build(),
+        )
+    }
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val data = response.parseAs<Hentai>(json)
@@ -363,7 +379,10 @@ open class NHentai(
         PagesFilter(),
 
         Filter.Separator(),
-        SortFilter(SORT_OPTIONS.indexOfFirst { it.second == preferences.getString(SORT_PREF, "popular") }.coerceAtLeast(0)),
+        SortFilter(
+            SORT_OPTIONS.indexOfFirst { it.second == preferences.getString(SORT_PREF, "popular") }
+                .coerceAtLeast(0),
+        ),
         OffsetPageFilter(),
         Filter.Header("Sort is ignored if favorites only"),
         FavoriteFilter(),
@@ -396,6 +415,21 @@ open class NHentai(
     companion object {
         const val API_KEY = "api_key"
         const val PREFIX_ID_SEARCH = "id:"
+        private const val NHENTAI_HOST = "nhentai.net"
+        private val GALLERY_PATH_REGEX = Regex("^/api/v2/galleries/\\d+/?$")
+        private val API_PATH_REGEX = Regex("^/api/v2/.*$")
+        private const val BACKOFF_RETRY_HEADER = "X-NHentai-Backoff-Retry"
+        private const val RATE_LIMIT_PREF = "rate_limit_pref"
+        private const val RATE_LIMIT_DEFAULT = "1/4"
+        private const val RATE_LIMIT_MIN_PERMITS = 1
+        private const val RATE_LIMIT_MAX_PERMITS = 10
+        private const val RATE_LIMIT_MIN_PERIOD_SECONDS = 1L
+        private const val RATE_LIMIT_MAX_PERIOD_SECONDS = 60L
+        private val RATE_LIMIT_OPTIONS = arrayOf(
+            Pair("0.25 rps (default)", "1/4"),
+            Pair("1 rps", "1/1"),
+            Pair("4 rps (recommended with API key)", "4/1"),
+        )
         private const val TITLE_PREF = "Display manga title as:"
 
         private val SORT_OPTIONS = arrayOf(
@@ -407,5 +441,89 @@ open class NHentai(
         )
 
         private const val SORT_PREF = "Default sort preference when searching"
+    }
+
+    private fun SharedPreferences.parseRateLimit(): Pair<Int, Long> {
+        val raw = getString(RATE_LIMIT_PREF, RATE_LIMIT_DEFAULT).orEmpty()
+        val parts = raw.split("/", limit = 2)
+        if (parts.size != 2) return defaultRateLimit()
+
+        val permits = parts[0].toIntOrNull()
+        val period = parts[1].toLongOrNull()
+        if (permits == null || period == null) return defaultRateLimit()
+
+        return permits.coerceIn(RATE_LIMIT_MIN_PERMITS, RATE_LIMIT_MAX_PERMITS) to
+            period.coerceIn(RATE_LIMIT_MIN_PERIOD_SECONDS, RATE_LIMIT_MAX_PERIOD_SECONDS)
+    }
+
+    private fun defaultRateLimit(): Pair<Int, Long> = 1 to 4L
+
+    private class NhGalleryCacheInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val response = chain.proceed(chain.request())
+            if (!GALLERY_PATH_REGEX.matches(response.request.url.encodedPath)) return response
+            return response.newBuilder()
+                .removeHeader("Cache-Control")
+                .removeHeader("Expires")
+                .removeHeader("Pragma")
+                .build()
+        }
+    }
+
+    private class NhApiRetryInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val url = request.url
+            if (url.host != NHENTAI_HOST || !API_PATH_REGEX.matches(url.encodedPath)) {
+                return chain.proceed(request)
+            }
+
+            val response = chain.proceed(request)
+            if (response.code != 429 || request.header(BACKOFF_RETRY_HEADER) != null) {
+                return response
+            }
+
+            // Do not block OkHttp threads; only immediate one-shot retry.
+            val retryAfterSeconds = response.header("Retry-After")?.toLongOrNull()
+            if (retryAfterSeconds != null && retryAfterSeconds > 0L) return response
+
+            response.close()
+            val retryRequest = request.newBuilder()
+                .header(BACKOFF_RETRY_HEADER, "1")
+                .build()
+            return chain.proceed(retryRequest)
+        }
+    }
+
+    private inner class NhAuthorizationInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            var request = chain.request()
+            if (!apiKey.isNullOrBlank()) {
+                request = request.newBuilder().addHeader("Authorization", "Key $apiKey").build()
+                val response = chain.proceed(request)
+                if (response.code == 401) {
+                    response.close()
+                    throw IOException("Invalid API key")
+                }
+                return response
+            }
+
+            if (request.url.toString().contains("/favorites")) {
+                val newToken = cookieToken
+                if (accessToken != newToken) accessToken = newToken
+                if (accessToken.isNotBlank()) {
+                    request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
+                }
+                val response = chain.proceed(request)
+                if (response.code == 401) {
+                    response.close()
+                    accessToken = ""
+                    throw IOException("Log in via WebView or add API key in the settings to view favorites")
+                }
+                return response
+            }
+
+            return chain.proceed(request)
+        }
     }
 }
