@@ -103,7 +103,6 @@ open class NHentai(
             ?.split("; ")
             ?.firstOrNull { it.startsWith("access_token=") }
             ?.replace("access_token=", "") ?: ""
-    var accessToken: String = ""
 
     // Cdns
 
@@ -332,14 +331,9 @@ open class NHentai(
 
     // Chapter List
 
-    override fun chapterListRequest(manga: SManga): Request {
-        val id = manga.url.removeSurrounding("/g/", "/")
-        return GET(
-            "$apiUrl/galleries/$id",
-            headers,
-            CacheControl.Builder().maxStale(2, TimeUnit.HOURS).build(),
-        )
-    }
+    override fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga).newBuilder()
+        .cacheControl(CacheControl.Builder().maxStale(2, TimeUnit.HOURS).build())
+        .build()
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val data = response.parseAs<Hentai>(json)
@@ -419,6 +413,7 @@ open class NHentai(
         private val GALLERY_PATH_REGEX = Regex("^/api/v2/galleries/\\d+/?$")
         private val API_PATH_REGEX = Regex("^/api/v2/.*$")
         private const val BACKOFF_RETRY_HEADER = "X-NHentai-Backoff-Retry"
+        private const val GALLERY_CACHE_MAX_AGE_SECONDS = 7200
         private const val RATE_LIMIT_PREF = "rate_limit_pref"
         private const val RATE_LIMIT_DEFAULT = "1/4"
         private const val RATE_LIMIT_MIN_PERMITS = 1
@@ -466,6 +461,7 @@ open class NHentai(
                 .removeHeader("Cache-Control")
                 .removeHeader("Expires")
                 .removeHeader("Pragma")
+                .header("Cache-Control", "max-age=$GALLERY_CACHE_MAX_AGE_SECONDS")
                 .build()
         }
     }
@@ -484,8 +480,8 @@ open class NHentai(
             }
 
             // Do not block OkHttp threads; only immediate one-shot retry.
-            val retryAfterSeconds = response.header("Retry-After")?.toLongOrNull()
-            if (retryAfterSeconds != null && retryAfterSeconds > 0L) return response
+            val retryAfter = response.header("Retry-After")?.trim()
+            if (!retryAfter.isNullOrEmpty() && retryAfter.toLongOrNull() != 0L) return response
 
             response.close()
             val retryRequest = request.newBuilder()
@@ -498,6 +494,11 @@ open class NHentai(
     private inner class NhAuthorizationInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             var request = chain.request()
+            val url = request.url
+            if (url.host != NHENTAI_HOST || !API_PATH_REGEX.matches(url.encodedPath)) {
+                return chain.proceed(request)
+            }
+
             if (!apiKey.isNullOrBlank()) {
                 request = request.newBuilder().addHeader("Authorization", "Key $apiKey").build()
                 val response = chain.proceed(request)
@@ -508,16 +509,14 @@ open class NHentai(
                 return response
             }
 
-            if (request.url.toString().contains("/favorites")) {
-                val newToken = cookieToken
-                if (accessToken != newToken) accessToken = newToken
+            if (url.encodedPath == "/api/v2/favorites") {
+                val accessToken = cookieToken
                 if (accessToken.isNotBlank()) {
                     request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
                 }
                 val response = chain.proceed(request)
                 if (response.code == 401) {
                     response.close()
-                    accessToken = ""
                     throw IOException("Log in via WebView or add API key in the settings to view favorites")
                 }
                 return response
