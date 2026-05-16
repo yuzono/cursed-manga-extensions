@@ -421,7 +421,7 @@ open class NHentai(
         private const val RATE_LIMIT_MIN_PERIOD_SECONDS = 1L
         private const val RATE_LIMIT_MAX_PERIOD_SECONDS = 60L
         private val RATE_LIMIT_OPTIONS = arrayOf(
-            Pair("0.25 rps (default)", "1/4"),
+            Pair("0.25 rps (default)", RATE_LIMIT_DEFAULT),
             Pair("1 rps", "1/1"),
             Pair("4 rps (recommended with API key)", "4/1"),
         )
@@ -440,18 +440,22 @@ open class NHentai(
 
     private fun SharedPreferences.parseRateLimit(): Pair<Int, Long> {
         val raw = getString(RATE_LIMIT_PREF, RATE_LIMIT_DEFAULT).orEmpty()
+        return parseRateLimitString(raw) ?: defaultRateLimit()
+    }
+
+    private fun defaultRateLimit(): Pair<Int, Long> = requireNotNull(parseRateLimitString(RATE_LIMIT_DEFAULT))
+
+    private fun parseRateLimitString(raw: String): Pair<Int, Long>? {
         val parts = raw.split("/", limit = 2)
-        if (parts.size != 2) return defaultRateLimit()
+        if (parts.size != 2) return null
 
         val permits = parts[0].toIntOrNull()
         val period = parts[1].toLongOrNull()
-        if (permits == null || period == null) return defaultRateLimit()
+        if (permits == null || period == null) return null
 
         return permits.coerceIn(RATE_LIMIT_MIN_PERMITS, RATE_LIMIT_MAX_PERMITS) to
             period.coerceIn(RATE_LIMIT_MIN_PERIOD_SECONDS, RATE_LIMIT_MAX_PERIOD_SECONDS)
     }
-
-    private fun defaultRateLimit(): Pair<Int, Long> = 1 to 4L
 
     private class NhGalleryCacheInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
