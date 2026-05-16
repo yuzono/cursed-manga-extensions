@@ -83,8 +83,8 @@ open class NHentai(
                     maxSize = 5L * 1024 * 1024, // 5 MiB which should be enough
                 ),
             )
+            .addInterceptor(NhApiRetryInterceptor())
             .addNetworkInterceptor(NhGalleryCacheInterceptor())
-            .addNetworkInterceptor(NhApiRetryInterceptor())
             .addNetworkInterceptor(NhAuthorizationInterceptor())
             .build()
     }
