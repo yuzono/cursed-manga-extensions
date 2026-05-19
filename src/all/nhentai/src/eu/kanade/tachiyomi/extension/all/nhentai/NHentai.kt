@@ -171,7 +171,7 @@ open class NHentai(
 
         ListPreference(screen.context).apply {
             key = RATE_LIMIT_PREF
-            title = "Library Update Request Rate"
+            title = "Network Rate Limit"
             summary = "%s"
             entries = RATE_LIMIT_OPTIONS.map { it.first }.toTypedArray()
             entryValues = RATE_LIMIT_OPTIONS.map { it.second }.toTypedArray()
@@ -415,14 +415,16 @@ open class NHentai(
         private const val BACKOFF_RETRY_HEADER = "X-NHentai-Backoff-Retry"
         private const val GALLERY_CACHE_MAX_AGE_SECONDS = 7200
         private const val RATE_LIMIT_PREF = "rate_limit_pref"
-        private const val RATE_LIMIT_DEFAULT = "1/4"
+        private const val RATE_LIMIT_DEFAULT = "1/1"
         private const val RATE_LIMIT_MIN_PERMITS = 1
         private const val RATE_LIMIT_MAX_PERMITS = 10
         private const val RATE_LIMIT_MIN_PERIOD_SECONDS = 1L
         private const val RATE_LIMIT_MAX_PERIOD_SECONDS = 60L
         private val RATE_LIMIT_OPTIONS = arrayOf(
-            Pair("0.25 rps (default)", RATE_LIMIT_DEFAULT),
-            Pair("1 rps", "1/1"),
+            Pair("0.25 rps", "1/4"),
+            Pair("0.5 rps", "1/2"),
+            Pair("1 rps (default)", "1/1"),
+            Pair("2 rps", "2/1"),
             Pair("4 rps (recommended with API key)", "4/1"),
         )
         private const val TITLE_PREF = "Display manga title as:"
@@ -461,6 +463,8 @@ open class NHentai(
         override fun intercept(chain: Interceptor.Chain): Response {
             val response = chain.proceed(chain.request())
             if (!GALLERY_PATH_REGEX.matches(response.request.url.encodedPath)) return response
+
+            // Tell HttpClient to cache the gallery API JSON response for 2 hours
             return response.newBuilder()
                 .removeHeader("Cache-Control")
                 .removeHeader("Expires")
@@ -474,17 +478,21 @@ open class NHentai(
         override fun intercept(chain: Interceptor.Chain): Response {
             val request = chain.request()
             val url = request.url
+
+            // If the request is not to the NHentai API, do not retry
             if (url.host != NHENTAI_HOST || !API_PATH_REGEX.matches(url.encodedPath)) {
                 return chain.proceed(request)
             }
 
             val response = chain.proceed(request)
+            // The request returned normally or this is already a retry request and still got a 429
             if (response.code != 429 || request.header(BACKOFF_RETRY_HEADER) != null) {
                 return response
             }
 
-            // Do not block OkHttp threads; only immediate one-shot retry.
+            // Do not block OkHttp threads; only immediate one-shot retry
             val retryAfter = response.header("Retry-After")?.trim()
+            // Server asks us to wait for a certain amount of time before retrying
             if (!retryAfter.isNullOrEmpty() && retryAfter.toLongOrNull() != 0L) return response
 
             response.close()
@@ -499,6 +507,8 @@ open class NHentai(
         override fun intercept(chain: Interceptor.Chain): Response {
             var request = chain.request()
             val url = request.url
+
+            // If the request is not to the NHentai API, do not add authorization headers
             if (url.host != NHENTAI_HOST || !API_PATH_REGEX.matches(url.encodedPath)) {
                 return chain.proceed(request)
             }
@@ -513,7 +523,7 @@ open class NHentai(
                 return response
             }
 
-            if (url.encodedPath == "/api/v2/favorites") {
+            if (url.encodedPath.contains("/favorites")) {
                 val accessToken = cookieToken
                 if (accessToken.isNotBlank()) {
                     request = request.newBuilder().addHeader("Authorization", "User $accessToken").build()
