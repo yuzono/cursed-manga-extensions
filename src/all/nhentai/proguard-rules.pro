@@ -1,2 +1,2 @@
 # Keep class names for reflection (qualifiedName)
--keepnames class * extends eu.kanade.tachiyomi.extension.all.nhentai.NHentai
+-keepnames class eu.kanade.tachiyomi.extension.all.nhentai.NHentai
