@@ -39,7 +39,7 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
     val tagGenres = tags
         .filter { (namespace, tagList) -> namespace !in EH_EXCLUDED_NAMESPACES && tagList.isNotEmpty() }
         .flatMap { (namespace, tagList) ->
-            tagList.map { tag -> "$namespace:${tag.name.replace(" ", "+")}" }
+            tagList.map { tag -> "$namespace:${tag.name}" }
         }
         .sorted()
 
