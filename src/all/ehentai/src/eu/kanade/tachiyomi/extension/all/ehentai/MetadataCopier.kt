@@ -8,8 +8,8 @@ import java.util.Locale
 private const val EH_ARTIST_NAMESPACE = "artist"
 private const val EH_AUTHOR_NAMESPACE = "author"
 
-// Namespaces whose tags are used to populate SManga.genre (tag detection)
-private val EH_GENRE_NAMESPACES = setOf("female", "male", "tag", "misc", "other")
+// Namespaces excluded from genre/tag chips (handled separately as artist/author fields)
+private val EH_EXCLUDED_NAMESPACES = setOf(EH_ARTIST_NAMESPACE, EH_AUTHOR_NAMESPACE)
 
 private val ONGOING_SUFFIX = arrayOf(
     "[ongoing]",
@@ -34,11 +34,13 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
         if (it.isNotEmpty()) manga.author = it.joinToString(transform = Tag::name)
     }
 
-    // Build genre from tags (tag detection, similar to NHentai)
-    // Collects tags from relevant namespaces, sorted alphabetically
+    // Build genre from all tag namespaces (except artist/author which are separate fields).
+    // Format: "namespace:tagname" so each chip is distinct and clickable as a valid EH search query.
     val tagGenres = tags
-        .filter { (namespace, tagList) -> namespace in EH_GENRE_NAMESPACES && tagList.isNotEmpty() }
-        .flatMap { (_, tagList) -> tagList.map(Tag::name) }
+        .filter { (namespace, tagList) -> namespace !in EH_EXCLUDED_NAMESPACES && tagList.isNotEmpty() }
+        .flatMap { (namespace, tagList) ->
+            tagList.map { tag -> "$namespace:${tag.name.replace(" ", "+")}" }
+        }
         .sorted()
 
     manga.genre = when {
