@@ -173,7 +173,7 @@ abstract class EHentai(
                 val splitted = filter.state.split(",").filter(String::isNotBlank)
                 splitted.forEach { tag ->
                     val trimmed = tag.trim().lowercase()
-                    val tagName = trimmed.removePrefix("-").replace(" ", "+")
+                    val tagName = trimmed.removePrefix("-")
                     val isExclude = trimmed.startsWith('-')
                     modifiedQuery += if (isExclude) {
                         " -${filter.type}:\"$tagName$\""
@@ -183,7 +183,8 @@ abstract class EHentai(
                 }
             }
         }
-        uri.appendQueryParameter("f_search", modifiedQuery)
+        val baseSearchUrl = "$baseUrl$QUERY_PREFIX&f_search=${URLEncoder.encode(modifiedQuery, "UTF-8")}"
+        val searchUri = Uri.parse(baseSearchUrl).buildUpon()
         // when attempting to search with no genres selected, will auto select all genres
         filters.filterIsInstance<GenreGroup>().firstOrNull()?.state?.let {
             // variable to to check is any genres are selected
@@ -197,14 +198,14 @@ abstract class EHentai(
         }
 
         filters.forEach {
-            if (it is UriFilter) it.addToUri(uri)
+            if (it is UriFilter) it.addToUri(searchUri)
         }
 
-        if (uri.toString().contains("f_spf") || uri.toString().contains("f_spt")) {
-            if (page > 1) uri.appendQueryParameter("from", lastMangaId)
+        if (searchUri.toString().contains("f_spf") || searchUri.toString().contains("f_spt")) {
+            if (page > 1) searchUri.appendQueryParameter("from", lastMangaId)
         }
 
-        return exGet(uri.toString(), page)
+        return exGet(searchUri.toString(), page)
     }
 
     override fun latestUpdatesRequest(page: Int) = exGet(baseUrl, page)
