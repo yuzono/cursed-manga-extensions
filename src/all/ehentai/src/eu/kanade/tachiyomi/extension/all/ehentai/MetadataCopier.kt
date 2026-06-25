@@ -8,6 +8,9 @@ import java.util.Locale
 private const val EH_ARTIST_NAMESPACE = "artist"
 private const val EH_AUTHOR_NAMESPACE = "author"
 
+// Namespaces whose tags are used to populate SManga.genre (tag detection)
+private val EH_GENRE_NAMESPACES = setOf("female", "male", "tag", "misc", "other")
+
 private val ONGOING_SUFFIX = arrayOf(
     "[ongoing]",
     "(ongoing)",
@@ -30,8 +33,19 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
     tags[EH_AUTHOR_NAMESPACE]?.let {
         if (it.isNotEmpty()) manga.author = it.joinToString(transform = Tag::name)
     }
-    // Set genre
-    genre?.let { manga.genre = it }
+
+    // Build genre from tags (tag detection, similar to NHentai)
+    // Collects tags from relevant namespaces, sorted alphabetically
+    val tagGenres = tags
+        .filter { (namespace, tagList) -> namespace in EH_GENRE_NAMESPACES && tagList.isNotEmpty() }
+        .flatMap { (_, tagList) -> tagList.map(Tag::name) }
+        .sorted()
+
+    manga.genre = when {
+        tagGenres.isNotEmpty() -> tagGenres.joinToString()
+        genre != null -> genre!!.trim()
+        else -> null
+    }
 
     // Try to automatically identify if it is ongoing, we try not to be too lenient here to avoid making mistakes
     // We default to completed
