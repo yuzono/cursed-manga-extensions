@@ -175,12 +175,10 @@ abstract class EHentai(
                     val trimmed = tag.trim().lowercase()
                     val tagName = trimmed.removePrefix("-").replace(" ", "+")
                     val isExclude = trimmed.startsWith('-')
-                    modifiedQuery += if (filter.type.isEmpty()) {
-                        // "Tags" filter: no namespace prefix, search all categories
-                        if (isExclude) " -\"$tagName$\"" else " \"$tagName$\""
+                    modifiedQuery += if (isExclude) {
+                        " -${filter.type}:\"$tagName$\""
                     } else {
-                        // "Female Tags", "Male Tags", etc.: use namespace prefix
-                        if (isExclude) " -${filter.type}:\"$tagName$\"" else " ${filter.type}:\"$tagName$\""
+                        " ${filter.type}:\"$tagName$\""
                     }
                 }
             }
@@ -477,7 +475,7 @@ abstract class EHentai(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
         Filter.Header("Use 'Female Tags' or 'Male Tags' for specific categories. 'Tags' searches all categories."),
-        TextFilter("Tags", ""),
+        TextFilter("Tags", "tag"),
         TextFilter("Female Tags", "female"),
         TextFilter("Male Tags", "male"),
         AdvancedGroup(),
