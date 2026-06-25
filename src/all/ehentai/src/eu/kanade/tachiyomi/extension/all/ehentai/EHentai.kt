@@ -626,7 +626,7 @@ abstract class EHentai(
         private const val ENFORCE_LANGUAGE_PREF_KEY = "ENFORCE_LANGUAGE"
         private const val ENFORCE_LANGUAGE_PREF_TITLE = "Enforce Language"
         private const val ENFORCE_LANGUAGE_PREF_SUMMARY = "If checked, forces browsing of manga matching a language tag"
-        private const val ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE = false
+        private const val ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE = true
 
         private const val ORIGINAL_IMAGE_PREF_KEY = "ORIGINAL_IMAGE"
         private const val ORIGINAL_IMAGE_PREF_TITLE = "Original Image"
