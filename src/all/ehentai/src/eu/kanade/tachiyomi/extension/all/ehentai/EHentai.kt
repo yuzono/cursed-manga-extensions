@@ -171,16 +171,16 @@ abstract class EHentai(
         filters.filterIsInstance<TextFilter>().forEach { filter ->
             if (filter.state.isNotEmpty()) {
                 val splitted = filter.state.split(",").filter(String::isNotBlank)
-                if (splitted.size < 2 && filter.type != "tags") {
-                    modifiedQuery += " ${filter.type}:\"${filter.state.replace(" ", "+")}\""
-                } else {
-                    splitted.forEach { tag ->
-                        val trimmed = tag.trim().lowercase()
-                        modifiedQuery += if (trimmed.startsWith('-')) {
-                            " -${filter.type}:\"${trimmed.removePrefix("-").replace(" ", "+")}\""
-                        } else {
-                            " ${filter.type}:\"${trimmed.replace(" ", "+")}\""
-                        }
+                splitted.forEach { tag ->
+                    val trimmed = tag.trim().lowercase()
+                    val tagName = trimmed.removePrefix("-").replace(" ", "+")
+                    val isExclude = trimmed.startsWith('-')
+                    modifiedQuery += if (filter.type.isEmpty()) {
+                        // "Tags" filter: no namespace prefix, search all categories
+                        if (isExclude) " -\"$tagName$\"" else " \"$tagName$\""
+                    } else {
+                        // "Female Tags", "Male Tags", etc.: use namespace prefix
+                        if (isExclude) " -${filter.type}:\"$tagName$\"" else " ${filter.type}:\"$tagName$\""
                     }
                 }
             }
@@ -409,7 +409,7 @@ abstract class EHentai(
 
         cookies["uconfig"] = buildSettings(settings)
 
-        // Bypass "Offensive For Everyone" content warning
+        // Bypass \"Offensive For Everyone\" content warning
         cookies["nw"] = "1"
 
         cookies["ipb_member_id"] = memberId
@@ -477,7 +477,7 @@ abstract class EHentai(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
         Filter.Header("Use 'Female Tags' or 'Male Tags' for specific categories. 'Tags' searches all categories."),
-        TextFilter("Tags", "tag"),
+        TextFilter("Tags", ""),
         TextFilter("Female Tags", "female"),
         TextFilter("Male Tags", "male"),
         AdvancedGroup(),
@@ -517,7 +517,7 @@ abstract class EHentai(
         UriGroup<GenreOption>(
             "Genres",
             listOf(
-                GenreOption("Dōjinshi", "doujinshi"),
+                GenreOption("D\u014djinshi", "doujinshi"),
                 GenreOption("Manga", "manga"),
                 GenreOption("Artist CG", "artistcg"),
                 GenreOption("Game CG", "gamecg"),
