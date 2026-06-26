@@ -8,4 +8,10 @@ keiyoushi {
     versionCode = 28
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
+
+    deeplink {
+        host("e-hentai.org")
+        host("exhentai.org")
+        path("/g/..*/..*")
+    }
 }

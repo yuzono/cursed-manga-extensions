@@ -8,6 +8,11 @@ keiyoushi {
     versionCode = 61
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
+
+    deeplink {
+        host("nhentai.net")
+        path("/g/..*")
+    }
 }
 
 dependencies {
