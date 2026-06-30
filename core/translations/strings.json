@@ -14,9 +14,29 @@
     "customUrlTitle": "URL base personalizada",
     "customUrlDialogMessage": "Dejar en blanco para usar la predeterminada"
   },
+  "ru": {
+    "mirrorTitle": "Домен",
+    "customUrlTitle": "Домен",
+    "customUrlDialogMessage": "Оставьте пустым, чтобы использовать домен по умолчанию"
+  },
   "vi": {
     "mirrorTitle": "Chọn tên miền",
     "customUrlTitle": "Tên miền tự chọn",
     "customUrlDialogMessage": "Bỏ trống để sử dụng giá trị mặc định"
+  },
+  "zh": {
+    "mirrorTitle": "镜像站点",
+    "customUrlTitle": "自定义基础 URL",
+    "customUrlDialogMessage": "留空则使用默认 URL"
+  },
+  "zh-Hans": {
+    "mirrorTitle": "镜像站点",
+    "customUrlTitle": "自定义基础 URL",
+    "customUrlDialogMessage": "留空则使用默认 URL"
+  },
+  "zh-Hant": {
+    "mirrorTitle": "鏡像站點",
+    "customUrlTitle": "自訂基本 URL",
+    "customUrlDialogMessage": "留空則使用預設 URL"
   }
 }

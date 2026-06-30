@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.annotation.Source
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -22,13 +23,8 @@ import rx.Observable
 import java.util.Calendar
 import java.util.regex.Pattern
 
-class Hentai2Read : ParsedHttpSource() {
-
-    override val name = "Hentai2Read"
-
-    override val baseUrl = "https://hentai2read.com"
-
-    override val lang = "en"
+@Source
+abstract class Hentai2Read : ParsedHttpSource() {
 
     override val supportsLatest = true
 

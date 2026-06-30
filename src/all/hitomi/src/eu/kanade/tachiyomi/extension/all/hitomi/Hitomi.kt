@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.annotation.Source
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.tryParse
 import kotlinx.coroutines.async
@@ -39,16 +40,42 @@ import kotlin.math.min
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalUnsignedTypes::class)
-class Hitomi(
-    override val lang: String,
-    private val nozomiLang: String,
-) : HttpSource() {
+@Source
+abstract class Hitomi : HttpSource() {
 
-    override val name = "Hitomi"
+    private val nozomiLang: String by lazy {
+        when (lang) {
+            "all" -> "all"
+            "en" -> "english"
+            "id" -> "indonesian"
+            "jv" -> "javanese"
+            "ca" -> "catalan"
+            "ceb" -> "cebuano"
+            "cs" -> "czech"
+            "da" -> "danish"
+            "de" -> "german"
+            "et" -> "estonian"
+            "es" -> "spanish"
+            "eo" -> "esperanto"
+            "fr" -> "french"
+            "it" -> "italian"
+            "hi" -> "hindi"
+            "hu" -> "hungarian"
+            "pl" -> "polish"
+            "pt" -> "portuguese"
+            "vi" -> "vietnamese"
+            "tr" -> "turkish"
+            "ru" -> "russian"
+            "uk" -> "ukrainian"
+            "ar" -> "arabic"
+            "ko" -> "korean"
+            "zh" -> "chinese"
+            "ja" -> "japanese"
+            else -> ""
+        }
+    }
 
     private val cdnDomain = "gold-usergeneratedcontent.net"
-
-    override val baseUrl = "https://hitomi.la"
 
     private val ltnUrl = "https://ltn.$cdnDomain"
 

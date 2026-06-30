@@ -7,8 +7,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.annotation.Source
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -18,14 +18,23 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import uy.kohesive.injekt.injectLazy
 
-abstract class Pururin(
-    override val lang: String = "all",
-    private val searchLang: Pair<String, String>? = null,
-    private val langPath: String = "",
-) : ParsedHttpSource() {
-    override val name = "Pururin"
+@Source
+abstract class Pururin : ParsedHttpSource() {
 
-    final override val baseUrl = "https://pururin.me"
+    private val searchLang: Pair<String, String>? by lazy {
+        when (lang) {
+            "en" -> Pair("13010", "english")
+            "ja" -> Pair("13011", "japanese")
+            else -> null
+        }
+    }
+    private val langPath: String by lazy {
+        when (lang) {
+            "en" -> "/tags/language/13010/english"
+            "ja" -> "/tags/language/13011/japanese"
+            else -> ""
+        }
+    }
 
     override val supportsLatest = true
 
@@ -112,7 +121,7 @@ abstract class Pururin(
         var pagesMax = 9999
         var sortBy = "newest"
 
-        if (searchLang != null) includeTags.add(searchLang)
+        searchLang?.let { includeTags.add(it) }
 
         filters.forEach {
             when (it) {

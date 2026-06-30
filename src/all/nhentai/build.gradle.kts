@@ -4,10 +4,17 @@ plugins {
 
 keiyoushi {
     name = "NHentai"
-    className = "NHFactory"
     versionCode = 61
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
+
+    listOf("all", "en", "ja", "zh").forEach { sourceLang ->
+        source {
+            lang = sourceLang
+            baseUrl = "https://nhentai.net"
+            if (sourceLang == "all") id = 7309872737163460316
+        }
+    }
 
     deeplink {
         host("nhentai.net")
@@ -16,5 +23,6 @@ keiyoushi {
 }
 
 dependencies {
+
     implementation(project(":lib:randomua"))
 }

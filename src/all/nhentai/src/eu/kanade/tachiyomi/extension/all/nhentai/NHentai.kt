@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.annotation.Source
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.network.rateLimit
@@ -44,21 +45,23 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 
-open class NHentai(
-    override val lang: String,
-    private val nhLang: String,
-) : HttpSource(),
+@Source
+abstract class NHentai :
+    HttpSource(),
     ConfigurableSource {
 
-    final override val baseUrl = "https://nhentai.net"
+    private val nhLang: String by lazy {
+        when (lang) {
+            "en" -> "english"
+            "ja" -> "japanese"
+            "zh" -> "chinese"
+            else -> ""
+        }
+    }
 
     val apiUrl = "$baseUrl/api/v2"
 
     private val baseUrlHost by lazy { baseUrl.toHttpUrl().host }
-
-    override val id by lazy { if (lang == "all") 7309872737163460316 else super.id }
-
-    override val name = "NHentai"
 
     override val supportsLatest = true
 
