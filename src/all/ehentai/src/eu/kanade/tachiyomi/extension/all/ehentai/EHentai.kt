@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.annotation.Source
 import keiyoushi.utils.getPreferencesLazy
 import okhttp3.CacheControl
 import okhttp3.CookieJar
@@ -33,13 +34,31 @@ import org.jsoup.nodes.Element
 import rx.Observable
 import java.net.URLEncoder
 
-abstract class EHentai(
-    override val lang: String,
-    private val ehLang: String,
-) : HttpSource(),
+@Source
+abstract class EHentai :
+    HttpSource(),
     ConfigurableSource {
 
-    override val name = "E-Hentai"
+    private val ehLang: String = when (lang) {
+        "ja" -> "japanese"
+        "en" -> "english"
+        "zh" -> "chinese"
+        "nl" -> "dutch"
+        "fr" -> "french"
+        "de" -> "german"
+        "hu" -> "hungarian"
+        "it" -> "italian"
+        "ko" -> "korean"
+        "pl" -> "polish"
+        "pt-BR" -> "portuguese"
+        "ru" -> "russian"
+        "es" -> "spanish"
+        "th" -> "thai"
+        "vi" -> "vietnamese"
+        "none" -> "n/a"
+        "other" -> "other"
+        else -> ""
+    }
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
