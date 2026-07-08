@@ -46,8 +46,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 
 @Source
-abstract class NHentai :
-    HttpSource(),
+class NHentai(
+    override val name: String,
+    override val lang: String,
+    override val baseUrl: String,
+    override val id: Long,
+) : HttpSource(),
     ConfigurableSource {
 
     private val nhLang: String by lazy {

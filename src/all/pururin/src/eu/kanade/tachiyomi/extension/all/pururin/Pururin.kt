@@ -19,7 +19,12 @@ import org.jsoup.nodes.Element
 import uy.kohesive.injekt.injectLazy
 
 @Source
-abstract class Pururin : ParsedHttpSource() {
+class Pururin(
+    override val name: String,
+    override val lang: String,
+    override val baseUrl: String,
+    override val id: Long,
+) : ParsedHttpSource() {
 
     private val searchLang: Pair<String, String>? by lazy {
         when (lang) {
