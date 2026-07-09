@@ -166,3 +166,5 @@ jobs:
       - name: Purge cached index on jsDelivr
         run: |
           curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.min.json
+          curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.json
+          curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.pb

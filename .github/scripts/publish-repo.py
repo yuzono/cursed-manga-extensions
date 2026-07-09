@@ -33,8 +33,8 @@ REPO_ICON_DIR = REPO_DIR / "icon"
 REPO_APK_DIR.mkdir(parents=True, exist_ok=True)
 REPO_ICON_DIR.mkdir(parents=True, exist_ok=True)
 
-APK_BASE_URL = "https://raw.githubusercontent.com/yuzono/cursed-manga-repo/refs/heads/repo/apk"
-ICON_BASE_URL = "https://raw.githubusercontent.com/yuzono/cursed-manga-repo/refs/heads/repo/icon"
+APK_BASE_URL = "https://cdn.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/apk"
+ICON_BASE_URL = "https://cdn.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/icon"
 
 to_delete: list[str] = json.loads(sys.argv[1])
 
