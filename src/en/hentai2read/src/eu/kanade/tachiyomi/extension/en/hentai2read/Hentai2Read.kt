@@ -9,48 +9,41 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
 import java.util.Calendar
-import java.util.regex.Pattern
 
 @Source
-abstract class Hentai2Read : ParsedHttpSource() {
+abstract class Hentai2Read : HttpSource() {
 
     override val supportsLatest = true
-
-    override val client: OkHttpClient = network.cloudflareClient
 
     companion object {
         const val IMAGE_BASE_URL = "https://static.hentaicdn.com/hentai"
 
         const val PREFIX_ID_SEARCH = "id:"
 
-        val pagesUrlPattern by lazy {
-            Pattern.compile("""'images' : \["(.*?),?"]""")
+        private val pagesUrlPattern by lazy {
+            Regex("""'images' : \["(.*?),?"]""")
         }
 
         lateinit var nextSearchPage: String
     }
 
-    override fun popularMangaSelector() = "div.book-grid-item"
-
-    override fun latestUpdatesSelector() = popularMangaSelector()
+    private fun popularMangaSelector() = "div.book-grid-item"
 
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/hentai-list/all/any/all/most-popular/$page/", headers)
 
     override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/hentai-list/all/any/all/last-updated/$page/", headers)
 
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
+    private fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
         thumbnail_url = element.select("img").attr("abs:src")
         element.select("div.overlay-title a").let {
             title = it.text()
@@ -58,11 +51,18 @@ abstract class Hentai2Read : ParsedHttpSource() {
         }
     }
 
-    override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
+    private fun popularMangaNextPageSelector() = "a#js-linkNext"
 
-    override fun popularMangaNextPageSelector() = "a#js-linkNext"
+    override fun popularMangaParse(response: Response): MangasPage {
+        val doc = response.asJsoup()
 
-    override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
+        val mangas = doc.select(popularMangaSelector()).map(::popularMangaFromElement)
+        val hasNextPage = doc.selectFirst(popularMangaNextPageSelector()) != null
+
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    override fun latestUpdatesParse(response: Response) = popularMangaParse(response)
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = if (query.startsWith("https://")) {
         val url = query.toHttpUrl()
@@ -83,9 +83,9 @@ abstract class Hentai2Read : ParsedHttpSource() {
 
     private fun requestSearch(page: Int, query: String, filters: FilterList): Pair<Request, String?> {
         val searchUrl = "$baseUrl/hentai-list/advanced-search"
-        var sortOrder: String? = null
 
         return if (page == 1) {
+            var sortOrder: String? = null
             val form = FormBody.Builder().apply {
                 add("cmd_wpm_wgt_mng_sch_sbm", "Search")
                 add("txt_wpm_wgt_mng_sch_nme", "")
@@ -127,7 +127,7 @@ abstract class Hentai2Read : ParsedHttpSource() {
             }
             Pair(POST(searchUrl, headers, form.build()), sortOrder)
         } else {
-            Pair(GET(nextSearchPage, headers), sortOrder)
+            Pair(GET(nextSearchPage, headers), null)
         }
     }
 
@@ -140,11 +140,11 @@ abstract class Hentai2Read : ParsedHttpSource() {
             response.asJsoup()
         }
 
-        val mangas = document.select(searchMangaSelector()).map { element ->
-            searchMangaFromElement(element)
+        val mangas = document.select(popularMangaSelector()).map { element ->
+            popularMangaFromElement(element)
         }
 
-        val hasNextPage = document.select(searchMangaNextPageSelector()).firstOrNull()?.let {
+        val hasNextPage = document.select(popularMangaNextPageSelector()).firstOrNull()?.let {
             nextSearchPage = it.attr("abs:href")
             true
         } ?: false
@@ -154,13 +154,10 @@ abstract class Hentai2Read : ParsedHttpSource() {
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw UnsupportedOperationException()
 
-    override fun searchMangaSelector() = popularMangaSelector()
+    override fun searchMangaParse(response: Response) = popularMangaParse(response)
 
-    override fun searchMangaFromElement(element: Element): SManga = popularMangaFromElement(element)
-
-    override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
-
-    override fun mangaDetailsParse(document: Document): SManga {
+    override fun mangaDetailsParse(response: Response): SManga {
+        val document = response.asJsoup()
         val infoElement = document.select("ul.list-simple-mini").first()!!
 
         val manga = SManga.create()
@@ -211,19 +208,25 @@ abstract class Hentai2Read : ParsedHttpSource() {
         else -> SManga.UNKNOWN
     }
 
-    override fun chapterListSelector() = "ul.nav-chapters > li > div.media > a"
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val doc = response.asJsoup()
 
-    override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
-        setUrlWithoutDomain(element.attr("href"))
-        val time = element.select("div > small").text().substringAfter("about").substringBefore("ago")
-        name = element.ownText().trim()
-        if (time != "") {
-            date_upload = parseChapterDate(time)
+        return doc.select("ul.nav-chapters > li > div.media > a").map { element ->
+            SChapter.create().apply {
+                setUrlWithoutDomain(element.attr("href"))
+                val time = element.select("div > small").text().substringAfter("about").substringBefore("ago")
+                name = element.ownText().trim()
+                if (time != "") {
+                    date_upload = parseChapterDate(time)
+                }
+            }
         }
     }
 
+    private val nonDigitRegex by lazy { Regex("""\D""") }
+
     private fun parseChapterDate(date: String): Long {
-        val value = date.replace(Regex("[^\\d]"), "").toInt()
+        val value = date.replace(nonDigitRegex, "").toInt()
 
         return when {
             "second" in date -> Calendar.getInstance().apply {
@@ -262,19 +265,16 @@ abstract class Hentai2Read : ParsedHttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val pages = mutableListOf<Page>()
-        val m = pagesUrlPattern.matcher(response.body.string())
         var i = 0
-        while (m.find()) {
-            m.group(1)?.split(",")?.forEach {
+        pagesUrlPattern.findAll(response.body.string()).forEach { match ->
+            match.groupValues[1].split(",").forEach {
                 pages.add(Page(i++, "", IMAGE_BASE_URL + it.trim('"').replace("""\/""", "/")))
             }
         }
         return pages
     }
 
-    override fun pageListParse(document: Document): List<Page> = throw UnsupportedOperationException()
-
-    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 
     private class MangaNameSelect : Filter.Select<String>("Manga Name", arrayOf("Contains", "Starts With", "Ends With"))
     private class ArtistName : Filter.Text("Artist")

@@ -2,10 +2,11 @@ package eu.kanade.tachiyomi.extension.all.pururin
 
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
 import kotlinx.serialization.Serializable
@@ -14,8 +15,6 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
 import uy.kohesive.injekt.injectLazy
 
 @Source
@@ -24,7 +23,7 @@ class Pururin(
     override val lang: String,
     override val baseUrl: String,
     override val id: Long,
-) : ParsedHttpSource() {
+) : HttpSource() {
 
     private val searchLang: Pair<String, String>? by lazy {
         when (lang) {
@@ -43,31 +42,30 @@ class Pururin(
 
     override val supportsLatest = true
 
-    override val client = network.cloudflareClient
-
     private val json: Json by injectLazy()
 
     // Popular
     override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/browse$langPath?sort=most-popular&page=$page", headers)
 
-    override fun popularMangaSelector(): String = "a.card"
+    override fun popularMangaParse(response: Response): MangasPage {
+        val doc = response.asJsoup()
 
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        title = element.attr("title")
-        setUrlWithoutDomain(element.attr("abs:href"))
-        thumbnail_url = element.select("img").attr("abs:src")
+        val mangas = doc.select("a.card").map { element ->
+            SManga.create().apply {
+                title = element.attr("title")
+                setUrlWithoutDomain(element.attr("abs:href"))
+                thumbnail_url = element.select("img").attr("abs:src")
+            }
+        }
+        val hasNextPage = doc.selectFirst(".page-item [rel=next]") != null
+
+        return MangasPage(mangas, hasNextPage)
     }
-
-    override fun popularMangaNextPageSelector(): String = ".page-item [rel=next]"
 
     // Latest
     override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/browse$langPath?page=$page", headers)
 
-    override fun latestUpdatesSelector(): String = popularMangaSelector()
-
-    override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
-
-    override fun latestUpdatesNextPageSelector(): String = popularMangaNextPageSelector()
+    override fun latestUpdatesParse(response: Response) = popularMangaParse(response)
 
     // Search
 
@@ -147,7 +145,7 @@ class Pururin(
 
                 is TextFilter -> {
                     if (it.state.isNotEmpty()) {
-                        it.state.split(",").filter(String::isNotBlank).map { tag ->
+                        it.state.split(",").filter(String::isNotBlank).forEach { tag ->
                             val trimmed = tag.trim()
                             if (trimmed.startsWith('-')) {
                                 tagSearch(trimmed.lowercase().removePrefix("-"), it.type)?.let { tagInfo ->
@@ -201,51 +199,51 @@ class Pururin(
         return GET(url, headers)
     }
 
-    override fun searchMangaSelector(): String = popularMangaSelector()
-
-    override fun searchMangaFromElement(element: Element): SManga = popularMangaFromElement(element)
-
-    override fun searchMangaNextPageSelector(): String = popularMangaNextPageSelector()
+    override fun searchMangaParse(response: Response) = popularMangaParse(response)
 
     // Details
 
-    override fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
-        document.select(".box-gallery").let { e ->
-            initialized = true
-            title = e.select(".title").text()
-            author = e.select("a[href*=/circle/]").eachText().joinToString().ifEmpty { e.select("[itemprop=author]").text() }
-            artist = e.select("[itemprop=author]").eachText().joinToString()
-            genre = e.select("a[href*=/content/]").eachText().joinToString()
-            description = e.select(".box-gallery .table-info tr")
-                .filter { tr ->
-                    tr.select("td").let { td ->
-                        td.isNotEmpty() &&
-                            td.none { it.text().contains("content", ignoreCase = true) || it.text().contains("ratings", ignoreCase = true) }
+    override fun mangaDetailsParse(response: Response): SManga {
+        val document = response.asJsoup()
+        return SManga.create().apply {
+            document.select(".box-gallery").let { e ->
+                initialized = true
+                title = e.select(".title").text()
+                author = e.select("a[href*=/circle/]").eachText().joinToString().ifEmpty { e.select("[itemprop=author]").text() }
+                artist = e.select("[itemprop=author]").eachText().joinToString()
+                genre = e.select("a[href*=/content/]").eachText().joinToString()
+                description = e.select(".box-gallery .table-info tr")
+                    .filter { tr ->
+                        tr.select("td").let { td ->
+                            td.isNotEmpty() &&
+                                td.none {
+                                    it.text().contains("content", ignoreCase = true) || it.text().contains("ratings", ignoreCase = true)
+                                }
+                        }
                     }
-                }
-                .joinToString("\n") { tr ->
-                    tr.select("td").let { td ->
-                        var a = td.select("a").toList()
-                        if (a.isEmpty()) a = td.drop(1)
-                        td.first()!!.text() + ": " + a.joinToString { it.text() }
+                    .joinToString("\n") { tr ->
+                        tr.select("td").let { td ->
+                            var a = td.select("a").toList()
+                            if (a.isEmpty()) a = td.drop(1)
+                            td.first()!!.text() + ": " + a.joinToString { it.text() }
+                        }
                     }
-                }
-            status = SManga.COMPLETED
-            thumbnail_url = e.select("img").attr("abs:src")
+                status = SManga.COMPLETED
+                thumbnail_url = e.select("img").attr("abs:src")
+            }
         }
     }
 
     // Chapters
 
-    override fun chapterListSelector(): String = ".table-collection tbody tr a"
-
-    override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
-        name = element.text()
-        setUrlWithoutDomain(element.attr("abs:href"))
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> = response.asJsoup().select(chapterListSelector())
-        .map { chapterFromElement(it) }
+    override fun chapterListParse(response: Response): List<SChapter> = response.asJsoup()
+        .select(".table-collection tbody tr a")
+        .map { element ->
+            SChapter.create().apply {
+                name = element.text()
+                setUrlWithoutDomain(element.attr("abs:href"))
+            }
+        }
         .reversed()
         .let { list ->
             list.ifEmpty {
@@ -260,12 +258,13 @@ class Pururin(
 
     // Pages
 
-    override fun pageListParse(document: Document): List<Page> = document.select(".gallery-preview a img")
+    override fun pageListParse(response: Response): List<Page> = response.asJsoup()
+        .select(".gallery-preview a img")
         .mapIndexed { i, img ->
             Page(i, "", (if (img.hasAttr("abs:src")) img.attr("abs:src") else img.attr("abs:data-src")).replace("t.", "."))
         }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
+    override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
     private inline fun <reified T> Response.parseAs(): T = json.decodeFromString(body.string())
     override fun getFilterList() = getFilters()

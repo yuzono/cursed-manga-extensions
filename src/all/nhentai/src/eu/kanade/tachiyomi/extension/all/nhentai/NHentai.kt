@@ -12,7 +12,7 @@ import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getGroups
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTagDescription
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTags
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.await
+import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -37,6 +37,7 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -85,7 +86,7 @@ class NHentai(
             ?: app.filesDir
         val cacheDirectory = File(cacheParent, "nhentai_api_cache_$lang")
 
-        network.cloudflareClient.newBuilder()
+        network.client.newBuilder()
             .cache(
                 Cache(
                     directory = cacheDirectory,
@@ -222,7 +223,7 @@ class NHentai(
 
     // Search
 
-    override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage = when {
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
         query.startsWith("https://") -> {
             val url = query.toHttpUrl()
             if (url.host != baseUrl.toHttpUrl().host) {
@@ -231,18 +232,20 @@ class NHentai(
             if (url.pathSegments.size < 2) {
                 throw Exception("Unsupported url")
             }
-            getSearchManga(page, "$PREFIX_ID_SEARCH${url.pathSegments[1]}", filters)
+            fetchSearchManga(page, "$PREFIX_ID_SEARCH${url.pathSegments[1]}", filters)
         }
         query.startsWith(PREFIX_ID_SEARCH) -> {
             val id = query.removePrefix(PREFIX_ID_SEARCH)
-            client.newCall(searchMangaByIdRequest(id)).await().use { searchMangaByIdParse(it) }
+            client.newCall(searchMangaByIdRequest(id)).asObservableSuccess()
+                .map { searchMangaByIdParse(it) }
         }
 
         query.toIntOrNull() != null -> {
-            client.newCall(searchMangaByIdRequest(query)).await().use { searchMangaByIdParse(it) }
+            client.newCall(searchMangaByIdRequest(query)).asObservableSuccess()
+                .map { searchMangaByIdParse(it) }
         }
 
-        else -> super.getSearchManga(page, query, filters)
+        else -> super.fetchSearchManga(page, query, filters)
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
