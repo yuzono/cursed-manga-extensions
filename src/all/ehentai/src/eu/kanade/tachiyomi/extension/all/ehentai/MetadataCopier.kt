@@ -43,11 +43,8 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
         }
         .sorted()
 
-    manga.genre = when {
-        tagGenres.isNotEmpty() -> tagGenres.joinToString()
-        genre != null -> genre!!.trim()
-        else -> null
-    }
+    manga.genre = tagGenres.joinToString().takeIf(String::isNotBlank)
+        ?: genre?.trim()?.takeIf(String::isNotBlank)
 
     // Try to automatically identify if it is ongoing, we try not to be too lenient here to avoid making mistakes
     // We default to completed
