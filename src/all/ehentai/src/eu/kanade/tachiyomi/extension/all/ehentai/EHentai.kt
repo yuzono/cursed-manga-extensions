@@ -516,7 +516,7 @@ abstract class EHentai(
         UriGroup<GenreOption>(
             "Genres",
             listOf(
-                GenreOption("D\u014djinshi", "doujinshi"),
+                GenreOption("Dōjinshi", "doujinshi"),
                 GenreOption("Manga", "manga"),
                 GenreOption("Artist CG", "artistcg"),
                 GenreOption("Game CG", "gamecg"),
