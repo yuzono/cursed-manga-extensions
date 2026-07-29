@@ -1,8 +1,0 @@
-ext {
-    extName = 'Pururin'
-    extClass = '.PururinFactory'
-    extVersionCode = 10
-    isNsfw = true
-}
-
-apply plugin: "kei.plugins.extension.legacy"

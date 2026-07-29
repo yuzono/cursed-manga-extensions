@@ -12,8 +12,7 @@ import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getGroups
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTagDescription
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getTags
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.await
-import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
+import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -23,8 +22,10 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.annotation.Source
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
+import keiyoushi.network.rateLimit
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
@@ -36,26 +37,36 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
-open class NHentai(
+@Source
+class NHentai(
+    override val name: String,
     override val lang: String,
-    private val nhLang: String,
+    override val baseUrl: String,
+    override val id: Long,
 ) : HttpSource(),
     ConfigurableSource {
 
-    final override val baseUrl = "https://nhentai.net"
+    private val nhLang: String by lazy {
+        when (lang) {
+            "en" -> "english"
+            "ja" -> "japanese"
+            "zh" -> "chinese"
+            else -> ""
+        }
+    }
 
     val apiUrl = "$baseUrl/api/v2"
 
-    override val id by lazy { if (lang == "all") 7309872737163460316 else super.id }
-
-    override val name = "NHentai"
+    private val baseUrlHost by lazy { baseUrl.toHttpUrl().host }
 
     override val supportsLatest = true
 
@@ -75,8 +86,7 @@ open class NHentai(
             ?: app.filesDir
         val cacheDirectory = File(cacheParent, "nhentai_api_cache_$lang")
 
-        network.cloudflareClient.newBuilder()
-            .rateLimitHost(baseUrl.toHttpUrl(), permits, period, TimeUnit.SECONDS)
+        network.client.newBuilder()
             .cache(
                 Cache(
                     directory = cacheDirectory,
@@ -86,6 +96,7 @@ open class NHentai(
             .addInterceptor(NhApiRetryInterceptor())
             .addNetworkInterceptor(NhGalleryCacheInterceptor())
             .addNetworkInterceptor(NhAuthorizationInterceptor())
+            .rateLimit(permits, period.seconds) { it.host == baseUrlHost }
             .build()
     }
 
@@ -212,7 +223,7 @@ open class NHentai(
 
     // Search
 
-    override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage = when {
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
         query.startsWith("https://") -> {
             val url = query.toHttpUrl()
             if (url.host != baseUrl.toHttpUrl().host) {
@@ -221,18 +232,20 @@ open class NHentai(
             if (url.pathSegments.size < 2) {
                 throw Exception("Unsupported url")
             }
-            getSearchManga(page, "$PREFIX_ID_SEARCH${url.pathSegments[1]}", filters)
+            fetchSearchManga(page, "$PREFIX_ID_SEARCH${url.pathSegments[1]}", filters)
         }
         query.startsWith(PREFIX_ID_SEARCH) -> {
             val id = query.removePrefix(PREFIX_ID_SEARCH)
-            client.newCall(searchMangaByIdRequest(id)).await().use { searchMangaByIdParse(it) }
+            client.newCall(searchMangaByIdRequest(id)).asObservableSuccess()
+                .map { searchMangaByIdParse(it) }
         }
 
         query.toIntOrNull() != null -> {
-            client.newCall(searchMangaByIdRequest(query)).await().use { searchMangaByIdParse(it) }
+            client.newCall(searchMangaByIdRequest(query)).asObservableSuccess()
+                .map { searchMangaByIdParse(it) }
         }
 
-        else -> super.getSearchManga(page, query, filters)
+        else -> super.fetchSearchManga(page, query, filters)
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
