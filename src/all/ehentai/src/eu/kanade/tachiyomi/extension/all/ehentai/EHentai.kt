@@ -181,7 +181,6 @@ abstract class EHentai :
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val enforceLanguageFilter = filters.find { it is EnforceLanguageFilter }?.state == true
-        val uri = Uri.parse("$baseUrl$QUERY_PREFIX").buildUpon()
         var modifiedQuery = when {
             !isLangNatural() -> query
             query.isBlank() -> languageTag(enforceLanguageFilter)
@@ -203,10 +202,10 @@ abstract class EHentai :
             }
         }
         val baseSearchUrl = "$baseUrl$QUERY_PREFIX&f_search=${URLEncoder.encode(modifiedQuery, "UTF-8")}"
-        val searchUri = Uri.parse(baseSearchUrl).buildUpon()
+        val uri = Uri.parse(baseSearchUrl).buildUpon()
         // when attempting to search with no genres selected, will auto select all genres
         filters.filterIsInstance<GenreGroup>().firstOrNull()?.state?.let {
-            // variable to to check is any genres are selected
+            // variable to check if any genres are selected
             val check = it.any { option -> option.state } // or it.any(GenreOption::state)
             // if no genres are selected by the user set all genres to on
             if (!check) {
@@ -217,14 +216,14 @@ abstract class EHentai :
         }
 
         filters.forEach {
-            if (it is UriFilter) it.addToUri(searchUri)
+            if (it is UriFilter) it.addToUri(uri)
         }
 
-        if (searchUri.toString().contains("f_spf") || searchUri.toString().contains("f_spt")) {
-            if (page > 1) searchUri.appendQueryParameter("from", lastMangaId)
+        if (uri.toString().contains("f_spf") || uri.toString().contains("f_spt")) {
+            if (page > 1) uri.appendQueryParameter("from", lastMangaId)
         }
 
-        return exGet(searchUri.toString(), page)
+        return exGet(uri.toString(), page)
     }
 
     override fun latestUpdatesRequest(page: Int) = exGet(baseUrl, page)
@@ -427,7 +426,7 @@ abstract class EHentai :
 
         cookies["uconfig"] = buildSettings(settings)
 
-        // Bypass \"Offensive For Everyone\" content warning
+        // Bypass "Offensive For Everyone" content warning
         cookies["nw"] = "1"
 
         cookies["ipb_member_id"] = memberId
