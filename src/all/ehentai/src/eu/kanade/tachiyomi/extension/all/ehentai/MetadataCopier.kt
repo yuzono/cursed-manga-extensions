@@ -31,7 +31,7 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
         if (it.isNotEmpty()) manga.author = it.joinToString(transform = Tag::name)
     }
 
-    // Build genre from all tag namespaces (except artist/author which are separate fields).
+    // Build genre from all tag namespaces
     // Format: "namespace:tagname" so each chip is distinct and clickable as a valid EH search query.
     val tagGenres = tags
         .flatMap { (namespace, tagList) ->
