@@ -14,7 +14,7 @@ class ExGalleryMetadata {
     var title: String? = null
     var altTitle: String? = null
 
-    var genre: String? = null
+    var category: String? = null
 
     var datePosted: Long? = null
     var parent: String? = null

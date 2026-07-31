@@ -8,9 +8,6 @@ import java.util.Locale
 private const val EH_ARTIST_NAMESPACE = "artist"
 private const val EH_AUTHOR_NAMESPACE = "author"
 
-// Namespaces excluded from genre/tag chips (handled separately as artist/author fields)
-private val EH_EXCLUDED_NAMESPACES = setOf(EH_ARTIST_NAMESPACE, EH_AUTHOR_NAMESPACE)
-
 private val ONGOING_SUFFIX = arrayOf(
     "[ongoing]",
     "(ongoing)",
@@ -37,14 +34,12 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
     // Build genre from all tag namespaces (except artist/author which are separate fields).
     // Format: "namespace:tagname" so each chip is distinct and clickable as a valid EH search query.
     val tagGenres = tags
-        .filter { (namespace, tagList) -> namespace !in EH_EXCLUDED_NAMESPACES && tagList.isNotEmpty() }
         .flatMap { (namespace, tagList) ->
             tagList.map { tag -> "$namespace:${tag.name}" }
         }
         .sorted()
 
     manga.genre = tagGenres.joinToString().takeIf(String::isNotBlank)
-        ?: genre?.trim()?.takeIf(String::isNotBlank)
 
     // Try to automatically identify if it is ongoing, we try not to be too lenient here to avoid making mistakes
     // We default to completed
@@ -67,6 +62,7 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
     uploader?.let { detailsDesc += "Uploader: $it\n" }
     datePosted?.let { detailsDesc += "Posted: ${EX_DATE_FORMAT.format(Date(it))}\n" }
     visible?.let { detailsDesc += "Visible: $it\n" }
+    category?.let { detailsDesc += "Category: $it\n" }
     language?.let {
         detailsDesc += "Language: $it"
         if (translated == true) detailsDesc += " TR"

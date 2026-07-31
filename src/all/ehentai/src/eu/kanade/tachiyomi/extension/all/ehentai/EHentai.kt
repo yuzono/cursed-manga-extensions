@@ -274,7 +274,7 @@ abstract class EHentai :
             thumbnailUrl = select("#gd1 div").attr("style").nullIfBlank()?.let {
                 it.substring(it.indexOf('(') + 1 until it.lastIndexOf(')'))
             }
-            genre = select("#gdc div").text().nullIfBlank()?.trim()?.lowercase()
+            category = select("#gdc div").text().nullIfBlank()?.trim()?.lowercase()
 
             uploader = select("#gdn").text().nullIfBlank()?.trim()
 
