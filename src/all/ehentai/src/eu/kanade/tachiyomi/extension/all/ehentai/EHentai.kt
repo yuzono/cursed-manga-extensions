@@ -194,9 +194,9 @@ abstract class EHentai :
                     val tagName = trimmed.removePrefix("-")
                     val isExclude = trimmed.startsWith('-')
                     modifiedQuery += if (isExclude) {
-                        " -${filter.type}:\"$tagName$\""
+                        " -${filter.type}:\"$tagName\""
                     } else {
-                        " ${filter.type}:\"$tagName$\""
+                        " ${filter.type}:\"$tagName\""
                     }
                 }
             }
