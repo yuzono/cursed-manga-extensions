@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches:
-      # - main
       - main
     paths:
       - '**'
@@ -150,10 +149,11 @@ jobs:
       - name: Publish repo
         env:
           DELETE: ${{ needs.prepare.outputs.delete }}
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
         run: |
           cd repo
           pip install protobuf
-          python ../${{ github.ref_name }}/.github/scripts/publish-repo.py "$DELETE"
+          python ../${{ github.ref_name }}/.github/scripts/publish-repo.py "$DELETE" "$GITHUB_SHA"
 
       - name: Deploy repo
         uses: EndBug/add-and-commit@cc9c08ba6c8df3b93a8f2db63e89b98368ae2ae8 # v11
@@ -170,3 +170,5 @@ jobs:
           curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.min.json
           curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.json
           curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.pb
+          curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.beta.json
+          curl https://purge.jsdelivr.net/gh/yuzono/cursed-manga-repo@repo/index.beta.pb
