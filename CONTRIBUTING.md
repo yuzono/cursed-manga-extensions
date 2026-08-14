@@ -184,12 +184,12 @@ navigate and build. This will also reduce disk usage and network traffic.
    git remote add upstream <yuzono-url>
    # optionally disable push to upstream
    git remote set-url --push upstream no_pushing
-   # optionally fetch master only (ignore all other branches)
-   git config remote.upstream.fetch "+refs/heads/master:refs/remotes/upstream/master"
+   # optionally fetch main only (ignore all other branches)
+   git config remote.upstream.fetch "+refs/heads/main:refs/remotes/upstream/main"
    # update remotes
    git remote update
-   # track master of upstream instead of fork
-   git branch master -u upstream/master
+   # track main of upstream instead of fork
+   git branch main -u upstream/main
    ```
 
 4. Useful configurations. (optional)
@@ -197,15 +197,15 @@ navigate and build. This will also reduce disk usage and network traffic.
   ```bash
   # prune obsolete remote branches on fetch
   git config remote.origin.prune true
-  # fast-forward only when pulling master branch
+  # fast-forward only when pulling main branch
   git config pull.ff only
-  # Add an alias to sync master branch without fetching useless blobs.
+  # Add an alias to sync main branch without fetching useless blobs.
   # If you run `git pull` to fast-forward in a blobless clone like this,
   # all blobs (files) in the new commits are still fetched regardless of
   # sparse rules, which makes the local repo accumulate unused files.
-  # Use `git sync-master` to avoid this. Be careful if you have changes
-  # on master branch, which is bad practice.
-  git config alias.sync-master '!git switch master && git fetch upstream && git reset --keep FETCH_HEAD'
+  # Use `git sync-main` to avoid this. Be careful if you have changes
+  # on main branch, which is bad practice.
+  git config alias.sync-main '!git switch main && git fetch upstream && git reset --keep FETCH_HEAD'
    ```
 
 5. Later, if you change the sparse checkout filter, run `git sparse-checkout reapply`.
@@ -513,21 +513,21 @@ use case. Each lib is self-documented via KDoc comments and/or a README in its o
 
 | Module                                                                                                    | Description                                                                             |
 |-----------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| [`lib-cookieinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/cookieinterceptor) | Injects cookies into OkHttp requests for a given domain                                 |
-| [`lib-cryptoaes`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/cryptoaes)                 | AES-CBC decryption compatible with CryptoJS; JSFuck deobfuscation                       |
-| [`lib-dataimage`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/dataimage)                 | Decodes base64 `data:image` strings into mock URLs that OkHttp can handle               |
-| [`lib-e4p`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/e4p)                             | Decodes and decrypts E4P-format manga page archives (TIFF/XEBP)                         |
-| [`lib-i18n`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/i18n)                           | Internationalization helper (`Intl`) for multi-language UI strings in extensions        |
-| [`lib-lzstring`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/lzstring)                   | LZ-String decompression and compression                                                 |
-| [`lib-publus`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/publus)                       | Handles Publus DRM-protected reader decryption, unscrambling, and page loading          |
-| [`lib-randomua`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/randomua)                   | Fetches and rotates real-world User-Agent strings (requires overriding `getMangaUrl()`) |
-| [`lib-secretstream`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/secretstream)           | ChaCha20/Poly1305/X25519 cryptography for secret-stream encrypted sources               |
-| [`lib-seedrandom`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/seedrandom)               | Seeded deterministic pseudo-random number generation (ARC4-based)                       |
-| [`lib-speedbinb`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/speedbinb)                 | Processes, decrypts, and descrambles SpeedBinb reader payloads                          |
-| [`lib-synchrony`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/synchrony)                 | JavaScript deobfuscation via the Synchrony engine (QuickJS sandbox)                     |
-| [`lib-textinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/textinterceptor)     | Renders plain text or HTML as a PNG image page                                          |
-| [`lib-unpacker`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/unpacker)                   | Unpacks Dean Edwards-packed JavaScript; substring extraction helpers                    |
-| [`lib-zipinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/master/lib/zipinterceptor)       | Decodes, stitches, and processes multi-page ZIP/AVIF/SVG image archives                 |
+| [`lib-cookieinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/cookieinterceptor) | Injects cookies into OkHttp requests for a given domain                                 |
+| [`lib-cryptoaes`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/cryptoaes)                 | AES-CBC decryption compatible with CryptoJS; JSFuck deobfuscation                       |
+| [`lib-dataimage`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/dataimage)                 | Decodes base64 `data:image` strings into mock URLs that OkHttp can handle               |
+| [`lib-e4p`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/e4p)                             | Decodes and decrypts E4P-format manga page archives (TIFF/XEBP)                         |
+| [`lib-i18n`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/i18n)                           | Internationalization helper (`Intl`) for multi-language UI strings in extensions        |
+| [`lib-lzstring`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/lzstring)                   | LZ-String decompression and compression                                                 |
+| [`lib-publus`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/publus)                       | Handles Publus DRM-protected reader decryption, unscrambling, and page loading          |
+| [`lib-randomua`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/randomua)                   | Fetches and rotates real-world User-Agent strings (requires overriding `getMangaUrl()`) |
+| [`lib-secretstream`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/secretstream)           | ChaCha20/Poly1305/X25519 cryptography for secret-stream encrypted sources               |
+| [`lib-seedrandom`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/seedrandom)               | Seeded deterministic pseudo-random number generation (ARC4-based)                       |
+| [`lib-speedbinb`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/speedbinb)                 | Processes, decrypts, and descrambles SpeedBinb reader payloads                          |
+| [`lib-synchrony`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/synchrony)                 | JavaScript deobfuscation via the Synchrony engine (QuickJS sandbox)                     |
+| [`lib-textinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/textinterceptor)     | Renders plain text or HTML as a PNG image page                                          |
+| [`lib-unpacker`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/unpacker)                   | Unpacks Dean Edwards-packed JavaScript; substring extraction helpers                    |
+| [`lib-zipinterceptor`](https://github.com/yuzono/cursed-manga-extensions/tree/main/lib/zipinterceptor)       | Decodes, stitches, and processes multi-page ZIP/AVIF/SVG image archives                 |
 
 > [!IMPORTANT]
 > If your module uses `:lib:randomua`, the Spotless check requires your extension to override the `getMangaUrl()` method in your main class, or the build will fail.
@@ -1769,7 +1769,7 @@ $ ./gradlew src:<lang>:<source>:assembleDebug
 
 ## Submitting the changes
 
-When you feel confident about your changes, submit a new Pull Request for review. We encourage following a [GitHub Standard Fork & Pull Request Workflow](https://gist.github.com/Chaser324/ce0505fbed06b947d962); avoid committing directly to `master` and always create a new branch for your changes.
+When you feel confident about your changes, submit a new Pull Request for review. We encourage following a [GitHub Standard Fork & Pull Request Workflow](https://gist.github.com/Chaser324/ce0505fbed06b947d962); avoid committing directly to `main` and always create a new branch for your changes.
 
 If you prefer using Git GUI-based tools, refer to [this guide](https://learntodroid.com/how-to-use-git-and-github-in-android-studio/)
 about Git integration in Android Studio. Specifically, check the "How to Contribute to an Existing
