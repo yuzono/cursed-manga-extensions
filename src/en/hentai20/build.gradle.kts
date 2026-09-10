@@ -8,7 +8,7 @@ keiyoushi {
     name = "Hentai20"
     versionCode = 10
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.4"
+    libVersion = "1.6"
     theme = "mangathemesia"
 
     source {
