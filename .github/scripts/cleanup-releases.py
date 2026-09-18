@@ -79,6 +79,16 @@ def wait_for_publish_window() -> None:
         time.sleep(remaining)
 
 
+def pre_redirect_url(asset: dict) -> str:
+    """Asset url as index.json spells it, undoing any repository rename.
+
+    GitHub redirects api calls for a renamed repository, so assets come back under its
+    current owner/name while index.json still references the one it was published as.
+    """
+    _, _, path = asset["browser_download_url"].partition("/releases/download/")
+    return f"https://github.com/{REPO_NAME}/releases/download/{path}"
+
+
 def get_referenced_assets() -> set[str]:
     index = json.loads(
         run_gh(
@@ -88,11 +98,18 @@ def get_referenced_assets() -> set[str]:
             f"repos/{REPO_NAME}/contents/index.json?ref=repo",
         )
     )
-    return {
+    referenced = {
         extension["resources"][field]
         for extension in index["extensionList"]["extensions"]
         for field in ("apkUrl", "jarUrl")
     }
+
+    # An index that references nothing would have us delete every release, so treat it
+    # as a broken read rather than as a cleanup instruction.
+    if not referenced:
+        raise RuntimeError("index.json references no release asset")
+
+    return referenced
 
 
 def cleanup_releases(referenced: set[str]) -> tuple[int, int]:
@@ -106,7 +123,7 @@ def cleanup_releases(referenced: set[str]) -> tuple[int, int]:
         # Fast path: every asset is unreferenced -> delete the release in one call,
         # which takes the assets with it.
         if assets and not any(
-            asset["browser_download_url"] in referenced for asset in assets
+            pre_redirect_url(asset) in referenced for asset in assets
         ):
             print(
                 f"Deleting release {release['tag_name']} "
@@ -125,7 +142,7 @@ def cleanup_releases(referenced: set[str]) -> tuple[int, int]:
 
         remaining = len(assets)
         for asset in assets:
-            if asset["browser_download_url"] in referenced:
+            if pre_redirect_url(asset) in referenced:
                 continue
 
             print(f"Deleting {release['tag_name']}/{asset['name']}")
