@@ -321,16 +321,39 @@ abstract class Hitomi : HttpSource() {
                 return getGalleryIDsFromNozomi(area, tag, lang)
             }
 
-            val key = hashTerm(it)
-            val node = getGalleryNodeAtAddress(0)
-            val data = bSearch(key, node) ?: return emptySet()
-
-            return getGalleryIDsFromData(data)
+            return getGalleryIDsFromIndex(it)
         }
     }
 
-    private suspend fun getGalleryIDsFromData(data: Pair<Long, Int>): Set<Int> {
-        val url = "$ltnUrl/galleriesindex/galleries.$galleriesIndexVersion.data"
+    private suspend fun getGalleryIDsFromIndex(query: String): Set<Int> {
+        val key = hashTerm(query)
+        val version = getGalleriesIndexVersion()
+
+        return try {
+            getGalleryIDsFromIndex(key, version)
+        } catch (e: IllegalArgumentException) {
+            if (e.message != "HTTP error 404") throw e
+
+            // Hitomi removes old index files when the version rotates, so retry once with a fresh version.
+            getGalleryIDsFromIndex(key, refreshGalleriesIndexVersion(version))
+        }
+    }
+
+    private suspend fun getGalleryIDsFromIndex(
+        key: UByteArray,
+        version: String,
+    ): Set<Int> {
+        val node = getGalleryNodeAtAddress(0, version)
+        val data = bSearch(key, node, version) ?: return emptySet()
+
+        return getGalleryIDsFromData(data, version)
+    }
+
+    private suspend fun getGalleryIDsFromData(
+        data: Pair<Long, Int>,
+        version: String,
+    ): Set<Int> {
+        val url = "$ltnUrl/galleriesindex/galleries.$version.data"
         val (offset, length) = data
         require(length in 1..100000000) {
             "Length $length is too long"
@@ -367,6 +390,7 @@ abstract class Hitomi : HttpSource() {
     private tailrec suspend fun bSearch(
         key: UByteArray,
         node: Node,
+        version: String,
     ): Pair<Long, Int>? {
         fun compareArrayBuffers(
             dv1: UByteArray,
@@ -421,8 +445,8 @@ abstract class Hitomi : HttpSource() {
             return null
         }
 
-        val nextNode = getGalleryNodeAtAddress(node.subNodeAddresses[where])
-        return bSearch(key, nextNode)
+        val nextNode = getGalleryNodeAtAddress(node.subNodeAddresses[where], version)
+        return bSearch(key, nextNode, version)
     }
 
     private suspend fun getGalleryIDsFromNozomi(
@@ -454,11 +478,27 @@ abstract class Hitomi : HttpSource() {
         return nozomi
     }
 
-    private val galleriesIndexVersion by lazy {
-        client.newCall(
-            GET("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}", headers),
-        ).execute().use { it.body.string() }
+    private var cachedGalleriesIndexVersion: String? = null
+
+    private val galleriesIndexVersionMutex = Mutex()
+
+    private suspend fun getGalleriesIndexVersion(): String = galleriesIndexVersionMutex.withLock {
+        cachedGalleriesIndexVersion ?: fetchGalleriesIndexVersion().also {
+            cachedGalleriesIndexVersion = it
+        }
     }
+
+    private suspend fun refreshGalleriesIndexVersion(staleVersion: String): String = galleriesIndexVersionMutex.withLock {
+        if (cachedGalleriesIndexVersion == staleVersion) {
+            cachedGalleriesIndexVersion = fetchGalleriesIndexVersion()
+        }
+
+        requireNotNull(cachedGalleriesIndexVersion)
+    }
+
+    private suspend fun fetchGalleriesIndexVersion(): String = client.newCall(
+        GET("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}", headers),
+    ).awaitSuccess().use { it.body.string() }
 
     private data class Node(
         val keys: List<UByteArray>,
@@ -508,8 +548,11 @@ abstract class Hitomi : HttpSource() {
         return Node(keys, datas, subNodeAddresses)
     }
 
-    private suspend fun getGalleryNodeAtAddress(address: Long): Node {
-        val url = "$ltnUrl/galleriesindex/galleries.$galleriesIndexVersion.index"
+    private suspend fun getGalleryNodeAtAddress(
+        address: Long,
+        version: String,
+    ): Node {
+        val url = "$ltnUrl/galleriesindex/galleries.$version.index"
 
         val nodedata = getRangedResponse(url, address.until(address + 464))
 
