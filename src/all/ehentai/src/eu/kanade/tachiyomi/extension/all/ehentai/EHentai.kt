@@ -2,10 +2,10 @@ package eu.kanade.tachiyomi.extension.all.ehentai
 
 import android.annotation.SuppressLint
 import android.content.SharedPreferences
-import android.net.Uri
 import android.webkit.CookieManager
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
+import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -23,118 +23,73 @@ import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
+import keiyoushi.utils.getPreferences
 import keiyoushi.utils.getPreferencesLazy
-import okhttp3.CacheControl
-import okhttp3.CookieJar
-import okhttp3.Headers
+import keiyoushi.utils.tryParseDateTime
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.nodes.Element
 import rx.Observable
-import java.net.URLEncoder
+import java.time.ZoneOffset
 
 @Source
 abstract class EHentai :
     HttpSource(),
     ConfigurableSource {
 
-    private val ehLang: String = when (lang) {
-        "ja" -> "japanese"
-        "en" -> "english"
-        "zh" -> "chinese"
-        "nl" -> "dutch"
-        "fr" -> "french"
-        "de" -> "german"
-        "hu" -> "hungarian"
-        "it" -> "italian"
-        "ko" -> "korean"
-        "pl" -> "polish"
-        "pt-BR" -> "portuguese"
-        "ru" -> "russian"
-        "es" -> "spanish"
-        "th" -> "thai"
-        "vi" -> "vietnamese"
-        "none" -> "n/a"
-        "other" -> "other"
-        else -> ""
+    private val legacySettings by lazy {
+        legacyGallerySources.map { (language, sourceId) ->
+            legacyGallerySettings(language, getPreferences(sourceId).all)
+        }.filter { it.values.isNotEmpty() }
     }
 
-    private val preferences: SharedPreferences by getPreferencesLazy()
+    private val preferences: SharedPreferences by getPreferencesLazy {
+        if (!getBoolean(LEGACY_SETTINGS_IMPORTED, false)) {
+            gallerySettingsToMigrate(all, legacySettings)?.let(::importGallerySettings)
+        }
+    }
 
     private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
-    private val memberId: String by lazy { getMemberIdPref() }
-    private val passHash: String by lazy { getPassHashPref() }
-    private val igneous: String by lazy { getIgneousPref() }
-    private val forceEh: Boolean by lazy { getForceEhPref() }
+    private val forceEh: Boolean get() = getForceEhPref()
 
     override val baseUrl: String
-        get() = when {
-            System.getenv("CI") == "true" -> "https://e-hentai.org"
-            !forceEh && memberId.isNotEmpty() && passHash.isNotEmpty() -> "https://exhentai.org"
-            else -> "https://e-hentai.org"
+        get() {
+            if (System.getenv("CI") == "true" || forceEh) return "https://e-hentai.org"
+            val credentials = getGalleryCredentials(false)
+            return if (credentials.memberId.isNotEmpty() && credentials.passHash.isNotEmpty()) {
+                "https://exhentai.org"
+            } else {
+                "https://e-hentai.org"
+            }
         }
 
     override val supportsLatest = true
 
-    private var lastMangaId = ""
+    override fun toString() = name
 
-    // true if lang is a "natural human language"
-    private fun isLangNatural(): Boolean = lang !in listOf("none", "other")
+    private val latestPagination = GalleryPagination()
+    private val searchPagination = GalleryPagination()
 
-    private fun genericMangaParse(response: Response): MangasPage {
+    private fun genericMangaParse(response: Response, pagination: GalleryPagination? = null): MangasPage {
         val doc = response.asJsoup()
-        val mangaElements = doc.select("table.itg td.glname")
-            .let { elements ->
-                if (isLangNatural() && getEnforceLanguagePref()) {
-                    elements.filter { element ->
-                        // only accept elements with a language tag matching ehLang or without a language tag
-                        // could make this stricter and not accept elements without a language tag, possibly add a sharedpreference for it
-                        element.select("div[title^=language]").firstOrNull()?.let { it.text() == ehLang } ?: true
-                    }
-                } else {
-                    elements
-                }
-            }
-        val parsedMangas: MutableList<SManga> = mutableListOf()
-        for (i in mangaElements.indices) {
-            val manga = mangaElements[i].let {
-                SManga.create().apply {
-                    // Get title
-                    it.selectFirst("a")?.apply {
-                        title = this.select(".glink").text()
-                        url = ExGalleryMetadata.normalizeUrl(attr("href"))
-                        if (i == mangaElements.lastIndex) {
-                            lastMangaId = ExGalleryMetadata.galleryId(attr("href"))
-                        }
-                    }
-                    // Get image
-                    it.parent()?.select(".glthumb img")?.first().apply {
-                        thumbnail_url = this?.attr("data-src")?.nullIfBlank()
-                            ?: this?.attr("src")
-                    }
-                }
-            }
-            parsedMangas.add(manga)
-        }
-
-        // Add to page if required
-        val hasNextPage = doc.select("a#unext[href]").hasText()
-
-        return MangasPage(parsedMangas, hasNextPage)
+        val listing = GalleryList(doc)
+        pagination?.update(response.request, listing.nextPageUrl)
+        return MangasPage(listing.galleries.map { it.toSManga() }, pagination != null && listing.nextPageUrl != null)
     }
 
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = Observable.just(
-        listOf(
-            SChapter.create().apply {
-                url = manga.url
-                name = "Chapter"
-                chapter_number = 1f
-            },
-        ),
+    override fun chapterListRequest(manga: SManga) = exGet("$baseUrl${manga.url}")
+
+    override fun chapterListParse(response: Response): List<SChapter> = listOf(
+        SChapter.create().apply {
+            url = ExGalleryMetadata.normalizeUrl(response.request.url.encodedPath)
+            name = "Chapter"
+            chapter_number = 1f
+            date_upload = response.asJsoup().galleryPostedDate()
+        },
     )
 
-    override fun fetchPageList(chapter: SChapter) = fetchChapterPage(chapter, "$baseUrl/${chapter.url}").map {
+    override fun fetchPageList(chapter: SChapter) = fetchChapterPage(chapter, "$baseUrl${chapter.url}").map {
         it.mapIndexed { i, s ->
             Page(i, s)
         }
@@ -151,112 +106,31 @@ abstract class EHentai :
         val urls = ArrayList(pastUrls)
         return chapterPageCall(np).flatMap {
             val jsoup = it.asJsoup()
-            urls += parseChapterPage(jsoup)
-            nextPageUrl(jsoup)?.let { string ->
+            urls += jsoup.galleryImagePages()
+            jsoup.nextGalleryPageUrl()?.let { string ->
                 fetchChapterPage(chapter, string, urls)
             } ?: Observable.just(urls)
         }
     }
 
-    private fun parseChapterPage(response: Element) = with(response) {
-        select("#gdt a").map {
-            it.attr("href")
-        }
-    }
-
     private fun chapterPageCall(np: String) = client.newCall(chapterPageRequest(np)).asObservableSuccess()
-    private fun chapterPageRequest(np: String) = exGet(np, null, headers)
+    private fun chapterPageRequest(np: String) = exGet(np)
 
-    private fun nextPageUrl(element: Element) = element.select("a[onclick=return false]").last()?.let {
-        if (it.text() == ">") it.attr("href") else null
-    }
-
-    private fun languageTag(enforceLanguageFilter: Boolean = false): String = if (enforceLanguageFilter || getEnforceLanguagePref()) "language:$ehLang" else ""
-
-    override fun popularMangaRequest(page: Int) = if (isLangNatural()) {
-        exGet("$baseUrl/?f_search=${languageTag()}&f_srdd=5&f_sr=on", page)
-    } else {
-        latestUpdatesRequest(page)
-    }
+    override fun popularMangaRequest(page: Int) = exGet("$baseUrl/popular")
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val enforceLanguageFilter = filters.find { it is EnforceLanguageFilter }?.state == true
-        var modifiedQuery = when {
-            !isLangNatural() -> query
-            query.isBlank() -> languageTag(enforceLanguageFilter)
-            else -> languageTag(enforceLanguageFilter).let { if (it.isNotEmpty()) "$query,$it" else query }
-        }
-        filters.filterIsInstance<TextFilter>().forEach { filter ->
-            if (filter.state.isNotEmpty()) {
-                val splitted = filter.state.split(",").filter(String::isNotBlank)
-                splitted.forEach { tag ->
-                    val trimmed = tag.trim().lowercase()
-                    val tagName = trimmed.removePrefix("-")
-                    val isExclude = trimmed.startsWith('-')
-                    modifiedQuery += if (isExclude) {
-                        " -${filter.type}:\"$tagName\""
-                    } else {
-                        " ${filter.type}:\"$tagName\""
-                    }
-                }
-            }
-        }
-        val baseSearchUrl = "$baseUrl$QUERY_PREFIX&f_search=${URLEncoder.encode(modifiedQuery, "UTF-8")}"
-        val uri = Uri.parse(baseSearchUrl).buildUpon()
-        // when attempting to search with no genres selected, will auto select all genres
-        filters.filterIsInstance<GenreGroup>().firstOrNull()?.state?.let {
-            // variable to check if any genres are selected
-            val check = it.any { option -> option.state } // or it.any(GenreOption::state)
-            // if no genres are selected by the user set all genres to on
-            if (!check) {
-                for (i in it) {
-                    i.state = true
-                }
-            }
-        }
-
-        filters.forEach {
-            if (it is UriFilter) it.addToUri(uri)
-        }
-
-        if (uri.toString().contains("f_spf") || uri.toString().contains("f_spt")) {
-            if (page > 1) uri.appendQueryParameter("from", lastMangaId)
-        }
-
-        return exGet(uri.toString(), page)
+        val firstPageUrl = gallerySearchUrl(baseUrl, query, filters)
+        if (firstPageUrl.encodedPath == "/popular") return exGet(firstPageUrl.toString())
+        return searchPagination.request(exGet(firstPageUrl.toString()), page)
     }
 
-    override fun latestUpdatesRequest(page: Int) = exGet(baseUrl, page)
+    override fun latestUpdatesRequest(page: Int) = latestPagination.request(exGet(baseUrl), page)
 
     override fun popularMangaParse(response: Response) = genericMangaParse(response)
-    override fun searchMangaParse(response: Response) = genericMangaParse(response)
-    override fun latestUpdatesParse(response: Response) = genericMangaParse(response)
+    override fun searchMangaParse(response: Response) = genericMangaParse(response, searchPagination.takeUnless { response.request.url.encodedPath == "/popular" })
+    override fun latestUpdatesParse(response: Response) = genericMangaParse(response, latestPagination)
 
-    private fun exGet(url: String, page: Int? = null, additionalHeaders: Headers? = null, cache: Boolean = true): Request {
-        // pages no longer exist, if app attempts to go to the first page after a request, do not include the page append
-        val pageIndex = if (page == 1) null else page
-        return GET(
-            pageIndex?.let {
-                addParam(url, "next", lastMangaId)
-            } ?: url,
-            additionalHeaders?.let { header ->
-                val headers = headers.newBuilder()
-                header.toMultimap().forEach { (t, u) ->
-                    u.forEach {
-                        headers.add(t, it)
-                    }
-                }
-                headers.build()
-            } ?: headers,
-
-        ).let {
-            if (!cache) {
-                it.newBuilder().cacheControl(CacheControl.FORCE_NETWORK).build()
-            } else {
-                it
-            }
-        }
-    }
+    private fun exGet(url: String): Request = GET(url, headers)
 
     /**
      * Parse gallery page to metadata model
@@ -264,7 +138,7 @@ abstract class EHentai :
     @SuppressLint("DefaultLocale")
     override fun mangaDetailsParse(response: Response) = with(response.asJsoup()) {
         with(ExGalleryMetadata()) {
-            url = response.request.url.encodedPath
+            url = ExGalleryMetadata.normalizeUrl(response.request.url.encodedPath)
             title = select("#gn").text().nullIfBlank()?.trim()
 
             altTitle = select("#gj").text().nullIfBlank()?.trim()
@@ -294,7 +168,7 @@ abstract class EHentai :
                                         left.removeSuffix(":")
                                             .lowercase()
                                     ) {
-                                        "posted" -> datePosted = EX_DATE_FORMAT.parse(right)?.time ?: 0
+                                        "posted" -> datePosted = EX_DATE_FORMAT.tryParseDateTime(right, ZoneOffset.UTC)
 
                                         "visible" -> visible = right.nullIfBlank()
 
@@ -354,7 +228,7 @@ abstract class EHentai :
 
     private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
         val details = mangaDetailsParse(response)
-        details.url = "/g/$id/"
+        details.url = ExGalleryMetadata.normalizeUrl("/g/$id/")
         return MangasPage(listOf(details), false)
     }
 
@@ -375,125 +249,43 @@ abstract class EHentai :
         super.fetchSearchManga(page, query, filters)
     }
 
-    override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
-
     override fun pageListParse(response: Response) = throw UnsupportedOperationException()
 
     override fun imageUrlParse(response: Response): String = imageUrlParse(response, true)
 
-    private fun imageUrlParse(response: Response, isGetBakImageUrl: Boolean): String {
-        val doc = response.asJsoup()
-        val imgUrl = doc.select("#img").attr("abs:src")
-        // from https://github.com/Miuzarte/EHentai-go/blob/dd9a24adb13300c028c35f53b9eff31b51966def/query.go#L695
-        val nlValue = Regex("nl\\('(.+?)'\\)").find(doc.selectFirst("#loadfail")?.attr("onclick").orEmpty())?.groupValues?.get(1)
+    private fun imageUrlParse(response: Response, isGetBakImageUrl: Boolean): String = response.asJsoup()
+        .galleryImageUrl(response.request.url, getOriginalImagePref(), isGetBakImageUrl)
 
-        // from https://github.com/ccloli/E-Hentai-Downloader/blob/c51e1118def7541b5fbb224f7e512e170f4b9d5e/src/main.js#L2444
-        if (getOriginalImagePref()) {
-            val originalUrl = doc.selectFirst("a[href*=/fullimg/]")?.attr("abs:href")
-            if (!originalUrl.isNullOrEmpty()) {
-                return originalUrl.toHttpUrl()
-                    .newBuilder()
-                    .addQueryParameter("nl", nlValue)
-                    .build()
-                    .toString()
+    override val client by lazy {
+        network.client.newBuilder()
+            .addGalleryCookies(::getGalleryCredentials)
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val result = runCatching { chain.proceed(request) }
+                val bakUrl = request.url.fragment
+                    ?: return@addInterceptor result.getOrThrow()
+
+                if (result.isFailure || result.getOrNull()?.isSuccessful != true) {
+                    result.getOrNull()?.close()
+                    val newRequest = GET(bakUrl, headers)
+                    val newImageUrl = imageUrlParse(chain.proceed(newRequest), false)
+                    val newImageRequest = request.newBuilder()
+                        .url(newImageUrl)
+                        .build()
+
+                    chain.proceed(newImageRequest)
+                } else {
+                    result.getOrThrow()
+                }
             }
-        }
-
-        if (!isGetBakImageUrl) {
-            return imgUrl
-        }
-
-        if (nlValue.isNullOrEmpty()) return imgUrl
-        val bakUrl = response.request.url.newBuilder()
-            .addQueryParameter("nl", nlValue)
-            .toString()
-        return "$imgUrl#$bakUrl"
+            .build()
     }
-
-    private val cookiesHeader by lazy {
-        val cookies = mutableMapOf<String, String>()
-
-        // Setup settings
-        val settings = mutableListOf<String>()
-
-        // Do not show popular right now pane as we can't parse it
-        settings += "prn_n"
-
-        // Exclude every other language except the one we have selected
-        settings += "xl_" + languageMappings.filter { it.first != ehLang }
-            .flatMap { it.second }
-            .joinToString("x")
-
-        cookies["uconfig"] = buildSettings(settings)
-
-        // Bypass "Offensive For Everyone" content warning
-        cookies["nw"] = "1"
-
-        cookies["ipb_member_id"] = memberId
-
-        cookies["ipb_pass_hash"] = passHash
-
-        cookies["igneous"] = igneous
-
-        buildCookies(cookies)
-    }
-
-    // Headers
-    override fun headersBuilder() = super.headersBuilder().add("Cookie", cookiesHeader)
-
-    private fun buildSettings(settings: List<String?>) = settings.filterNotNull().joinToString(separator = "-")
-
-    private fun buildCookies(cookies: Map<String, String>) = cookies.entries.joinToString(separator = "; ", postfix = ";") {
-        "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
-    }
-
-    @Suppress("SameParameterValue")
-    private fun addParam(url: String, param: String, value: String) = Uri.parse(url)
-        .buildUpon()
-        .appendQueryParameter(param, value)
-        .toString()
-
-    override val client = network.client.newBuilder()
-        .cookieJar(CookieJar.NO_COOKIES)
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val result = runCatching { chain.proceed(request) }
-            val bakUrl = request.url.fragment
-                ?: return@addInterceptor result.getOrThrow()
-
-            if (result.isFailure || result.getOrNull()?.isSuccessful != true) {
-                result.getOrNull()?.close()
-                val newRequest = GET(bakUrl, headers)
-                val newImageUrl = imageUrlParse(chain.proceed(newRequest), false)
-                val newImageRequest = request.newBuilder()
-                    .url(newImageUrl)
-                    .build()
-
-                chain.proceed(newImageRequest)
-            } else {
-                result.getOrThrow()
-            }
-        }
-        .addInterceptor { chain ->
-            val newReq = chain
-                .request()
-                .newBuilder()
-                .removeHeader("Cookie")
-                .addHeader("Cookie", cookiesHeader)
-                .build()
-
-            chain.proceed(newReq)
-        }.build()
 
     // Filters
     override fun getFilterList() = FilterList(
-        EnforceLanguageFilter(getEnforceLanguagePref()),
-        Favorites(),
-        Watched(),
+        GalleryListFilter(),
+        GalleryLanguageFilter(),
         GenreGroup(),
-        Filter.Header("Separate tags with commas (,)"),
-        Filter.Header("Prepend with dash (-) to exclude"),
-        Filter.Header("Use 'Female Tags' or 'Male Tags' for specific categories. 'Tags' searches all categories."),
         TextFilter("Tags", "tag"),
         TextFilter("Female Tags", "female"),
         TextFilter("Male Tags", "male"),
@@ -502,57 +294,37 @@ abstract class EHentai :
 
     internal open class TextFilter(name: String, val type: String, val specific: String = "") : Text(name)
 
-    class Watched :
-        CheckBox("Watched List"),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state) {
-                builder.appendPath("watched")
-            }
-        }
-    }
-
-    class Favorites :
-        CheckBox("Favorites"),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state) {
-                builder.appendPath("favorites.php")
-            }
-        }
-    }
-
-    class GenreOption(name: String, private val genreId: String) :
-        CheckBox(name, false),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            builder.appendQueryParameter("f_$genreId", if (state) "1" else "0")
-        }
-    }
+    class GenreOption(name: String, val mask: Int) : CheckBox(name, false)
 
     class GenreGroup :
         UriGroup<GenreOption>(
-            "Genres",
+            "Categories",
             listOf(
-                GenreOption("Dōjinshi", "doujinshi"),
-                GenreOption("Manga", "manga"),
-                GenreOption("Artist CG", "artistcg"),
-                GenreOption("Game CG", "gamecg"),
-                GenreOption("Western", "western"),
-                GenreOption("Non-H", "non-h"),
-                GenreOption("Image Set", "imageset"),
-                GenreOption("Cosplay", "cosplay"),
-                GenreOption("Asian Porn", "asianporn"),
-                GenreOption("Misc", "misc"),
+                GenreOption("Dōjinshi", 2),
+                GenreOption("Manga", 4),
+                GenreOption("Artist CG", 8),
+                GenreOption("Game CG", 16),
+                GenreOption("Western", 512),
+                GenreOption("Non-H", 256),
+                GenreOption("Image Set", 32),
+                GenreOption("Cosplay", 64),
+                GenreOption("Asian Porn", 128),
+                GenreOption("Misc", 1),
             ),
-        )
+        ) {
+        override fun addToUri(builder: HttpUrl.Builder) {
+            if (state.any { it.state }) {
+                builder.addQueryParameter("f_cats", state.filterNot { it.state }.sumOf { it.mask }.toString())
+            }
+        }
+    }
 
     class AdvancedOption(name: String, private val param: String, defValue: Boolean = false) :
         CheckBox(name, defValue),
         UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
+        override fun addToUri(builder: HttpUrl.Builder) {
             if (state) {
-                builder.appendQueryParameter(param, "on")
+                builder.addQueryParameter(param, "on")
             }
         }
     }
@@ -560,13 +332,9 @@ abstract class EHentai :
     open class PageOption(name: String, private val queryKey: String) :
         Text(name),
         UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
+        override fun addToUri(builder: HttpUrl.Builder) {
             if (state.isNotBlank()) {
-                if (builder.build().getQueryParameters("f_sp").isEmpty()) {
-                    builder.appendQueryParameter("f_sp", "on")
-                }
-
-                builder.appendQueryParameter(queryKey, state.trim())
+                builder.addQueryParameter(queryKey, state.trim())
             }
         }
     }
@@ -586,10 +354,9 @@ abstract class EHentai :
             ),
         ),
         UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
+        override fun addToUri(builder: HttpUrl.Builder) {
             if (state > 0) {
-                builder.appendQueryParameter("f_srdd", (state + 1).toString())
-                builder.appendQueryParameter("f_sr", "on")
+                builder.addQueryParameter("f_srdd", (state + 1).toString())
             }
         }
     }
@@ -599,13 +366,7 @@ abstract class EHentai :
         UriGroup<Filter<*>>(
             "Advanced Options",
             listOf(
-                AdvancedOption("Search Gallery Name", "f_sname", true),
-                AdvancedOption("Search Gallery Tags", "f_stags", true),
-                AdvancedOption("Search Gallery Description", "f_sdesc"),
-                AdvancedOption("Search Torrent Filenames", "f_storr"),
                 AdvancedOption("Only Show Galleries With Torrents", "f_sto"),
-                AdvancedOption("Search Low-Power Tags", "f_sdt1"),
-                AdvancedOption("Search Downvoted Tags", "f_sdt2"),
                 AdvancedOption("Show Expunged Galleries", "f_sh"),
                 RatingOption(),
                 MinPagesOption(),
@@ -613,112 +374,68 @@ abstract class EHentai :
             ),
         )
 
-    private class EnforceLanguageFilter(default: Boolean) : CheckBox("Enforce language", default)
-
-    // map languages to their internal ids
-    private val languageMappings = listOf(
-        Pair("japanese", listOf("0", "1024", "2048")),
-        Pair("english", listOf("1", "1025", "2049")),
-        Pair("chinese", listOf("10", "1034", "2058")),
-        Pair("dutch", listOf("20", "1044", "2068")),
-        Pair("french", listOf("30", "1054", "2078")),
-        Pair("german", listOf("40", "1064", "2088")),
-        Pair("hungarian", listOf("50", "1074", "2098")),
-        Pair("italian", listOf("60", "1084", "2108")),
-        Pair("korean", listOf("70", "1094", "2118")),
-        Pair("polish", listOf("80", "1104", "2128")),
-        Pair("portuguese", listOf("90", "1114", "2138")),
-        Pair("russian", listOf("100", "1124", "2148")),
-        Pair("spanish", listOf("110", "1134", "2158")),
-        Pair("thai", listOf("120", "1144", "2168")),
-        Pair("vietnamese", listOf("130", "1154", "2178")),
-        Pair("n/a", listOf("254", "1278", "2302")),
-        Pair("other", listOf("255", "1279", "2303")),
-    )
-
     companion object {
-        const val QUERY_PREFIX = "?f_apply=Apply+Filter"
         const val PREFIX_ID_SEARCH = "id:"
         const val TR_SUFFIX = "TR"
-
-        // Preferences vals
-        private const val ENFORCE_LANGUAGE_PREF_KEY = "ENFORCE_LANGUAGE"
-        private const val ENFORCE_LANGUAGE_PREF_TITLE = "Enforce Language"
-        private const val ENFORCE_LANGUAGE_PREF_SUMMARY = "If checked, forces browsing of manga matching a language tag"
-        private const val ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE = false
-
-        private const val ORIGINAL_IMAGE_PREF_KEY = "ORIGINAL_IMAGE"
-        private const val ORIGINAL_IMAGE_PREF_TITLE = "Original Image"
-        private const val ORIGINAL_IMAGE_PREF_SUMMARY = "If checked, if your account has permission, it will use the original image and the image enhancement process will be slower"
-        private const val ORIGINAL_IMAGE_PREF_DEFAULT_VALUE = false
-
-        private const val MEMBER_ID_PREF_KEY = "MEMBER_ID"
-        private const val MEMBER_ID_PREF_TITLE = "ipb_member_id"
-        private const val MEMBER_ID_PREF_SUMMARY = "ipb_member_id value"
-        private const val MEMBER_ID_PREF_DEFAULT_VALUE = ""
-
-        private const val PASS_HASH_PREF_KEY = "PASS_HASH"
-        private const val PASS_HASH_PREF_TITLE = "ipb_pass_hash"
-        private const val PASS_HASH_PREF_SUMMARY = "ipb_pass_hash value"
-        private const val PASS_HASH_PREF_DEFAULT_VALUE = ""
-
-        private const val IGNEOUS_PREF_KEY = "IGNEOUS"
-        private const val IGNEOUS_PREF_TITLE = "igneous"
-        private const val IGNEOUS_PREF_SUMMARY = "igneous value override"
-        private const val IGNEOUS_PREF_DEFAULT_VALUE = ""
-
-        private const val FORCE_EH = "FORCE_EH"
-        private const val FORCE_EH_TITLE = "Force e-hentai"
-        private const val FORCE_EH_SUMMARY = "Force e-hentai to avoid content on exhentai"
-        private const val FORCE_EH_DEFAULT_VALUE = true
     }
 
     // Preferences
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        // Run migration before the host writes defaults for these preferences.
+        val needsImport = !preferences.getBoolean(LEGACY_SETTINGS_IMPORTED, false)
+
         val forceEhPref = CheckBoxPreference(screen.context).apply {
             key = FORCE_EH
-            title = FORCE_EH_TITLE
-            summary = FORCE_EH_SUMMARY
-            setDefaultValue(FORCE_EH_DEFAULT_VALUE)
-        }
-
-        val enforceLanguagePref = CheckBoxPreference(screen.context).apply {
-            key = "${ENFORCE_LANGUAGE_PREF_KEY}_$lang"
-            title = ENFORCE_LANGUAGE_PREF_TITLE
-            summary = ENFORCE_LANGUAGE_PREF_SUMMARY
-            setDefaultValue(ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE)
+            title = "Force e-hentai"
+            summary = "Force e-hentai to avoid content on exhentai"
+            setDefaultValue(true)
         }
 
         val originalImagePref = CheckBoxPreference(screen.context).apply {
-            key = "${ORIGINAL_IMAGE_PREF_KEY}_$lang"
-            title = ORIGINAL_IMAGE_PREF_TITLE
-            summary = ORIGINAL_IMAGE_PREF_SUMMARY
-            setDefaultValue(ORIGINAL_IMAGE_PREF_DEFAULT_VALUE)
+            key = ORIGINAL_IMAGE
+            title = "Original Image"
+            summary = "Use original images when your account permits it; images may load more slowly"
+            setDefaultValue(false)
         }
 
         val memberIdPref = EditTextPreference(screen.context).apply {
-            key = MEMBER_ID_PREF_KEY
-            title = MEMBER_ID_PREF_TITLE
-            summary = MEMBER_ID_PREF_SUMMARY
-
-            setDefaultValue(MEMBER_ID_PREF_DEFAULT_VALUE)
+            key = MEMBER_ID
+            title = "ipb_member_id"
+            setDefaultValue("")
         }
 
         val passHashPref = EditTextPreference(screen.context).apply {
-            key = PASS_HASH_PREF_KEY
-            title = PASS_HASH_PREF_TITLE
-            summary = PASS_HASH_PREF_SUMMARY
-
-            setDefaultValue(PASS_HASH_PREF_DEFAULT_VALUE)
+            key = PASS_HASH
+            title = "ipb_pass_hash"
+            setDefaultValue("")
         }
 
         val igneousPref = EditTextPreference(screen.context).apply {
-            key = IGNEOUS_PREF_KEY
-            title = IGNEOUS_PREF_TITLE
-            summary = IGNEOUS_PREF_SUMMARY
+            key = IGNEOUS
+            title = "igneous"
+            setDefaultValue("")
+        }
 
-            setDefaultValue(IGNEOUS_PREF_DEFAULT_VALUE)
+        if (needsImport) {
+            screen.addPreference(
+                ListPreference(screen.context).apply {
+                    key = "LEGACY_SETTINGS_SOURCE"
+                    title = "Import previous source settings"
+                    entries = legacySettings.map { it.language }.toTypedArray()
+                    entryValues = entries
+                    setDefaultValue("")
+                    setOnPreferenceChangeListener { _, value ->
+                        preferences.importGallerySettings(legacySettings.single { it.language == value }.values)
+                        forceEhPref.isChecked = getForceEhPref()
+                        originalImagePref.isChecked = getOriginalImagePref()
+                        memberIdPref.text = preferences.getString(MEMBER_ID, "")
+                        passHashPref.text = preferences.getString(PASS_HASH, "")
+                        igneousPref.text = preferences.getString(IGNEOUS, "")
+                        true
+                    }
+                },
+            )
         }
 
         screen.addPreference(forceEhPref)
@@ -726,40 +443,18 @@ abstract class EHentai :
         screen.addPreference(passHashPref)
         screen.addPreference(igneousPref)
         screen.addPreference(originalImagePref)
-        screen.addPreference(enforceLanguagePref)
     }
 
-    private fun getEnforceLanguagePref(): Boolean = preferences.getBoolean("${ENFORCE_LANGUAGE_PREF_KEY}_$lang", ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE)
+    private fun getOriginalImagePref(): Boolean = preferences.getBoolean(ORIGINAL_IMAGE, false)
 
-    private fun getOriginalImagePref(): Boolean = preferences.getBoolean("${ORIGINAL_IMAGE_PREF_KEY}_$lang", ORIGINAL_IMAGE_PREF_DEFAULT_VALUE)
-
-    private fun getCookieValue(cookieTitle: String, defaultValue: String, prefKey: String): String {
-        val cookies = webViewCookieManager.getCookie("https://forums.e-hentai.org")
-        var value: String? = null
-
-        if (cookies != null) {
-            val cookieArray = cookies.split("; ")
-            for (cookie in cookieArray) {
-                if (cookie.startsWith("$cookieTitle=")) {
-                    value = cookie.split("=")[1]
-
-                    break
-                }
-            }
+    private fun getGalleryCredentials(forceEh: Boolean, requestCookie: String? = null): GalleryCredentials = galleryCredentials(forceEh, webViewCookieManager::getCookie, requestCookie) { cookieTitle ->
+        val preferenceKey = when (cookieTitle) {
+            "ipb_member_id" -> MEMBER_ID
+            "ipb_pass_hash" -> PASS_HASH
+            else -> IGNEOUS
         }
-
-        if (value == null) {
-            value = preferences.getString(prefKey, defaultValue) ?: defaultValue
-        }
-
-        return value
+        preferences.getString(preferenceKey, "").orEmpty()
     }
 
-    private fun getPassHashPref(): String = getCookieValue(PASS_HASH_PREF_TITLE, PASS_HASH_PREF_DEFAULT_VALUE, PASS_HASH_PREF_KEY)
-
-    private fun getMemberIdPref(): String = getCookieValue(MEMBER_ID_PREF_TITLE, MEMBER_ID_PREF_DEFAULT_VALUE, MEMBER_ID_PREF_KEY)
-
-    private fun getIgneousPref(): String = getCookieValue(IGNEOUS_PREF_TITLE, IGNEOUS_PREF_DEFAULT_VALUE, IGNEOUS_PREF_KEY)
-
-    private fun getForceEhPref(): Boolean = preferences.getBoolean(FORCE_EH, FORCE_EH_DEFAULT_VALUE)
+    private fun getForceEhPref(): Boolean = preferences.getBoolean(FORCE_EH, true)
 }

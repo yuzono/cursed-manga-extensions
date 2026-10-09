@@ -6,21 +6,14 @@ plugins {
 
 keiyoushi {
     name = "E-Hentai"
-    versionCode = 29
+    versionCode = 40
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
 
-    listOf(
-        "ja", "en", "zh", "nl", "fr",
-        "de", "hu", "it", "ko", "pl",
-        "pt-BR", "ru", "es", "th", "vi",
-        "none", "other",
-    ).forEach { sourceLang ->
-        source {
-            lang = sourceLang
-            baseUrl = "https://e-hentai.org"
-            if (sourceLang == "pt-BR") id = 7151438547982231541
-        }
+    source {
+        id = 1713178126840476467
+        lang = "all"
+        baseUrl = "https://e-hentai.org"
     }
 
     deeplink {
@@ -28,4 +21,23 @@ keiyoushi {
         host("exhentai.org")
         path("/g/..*/..*")
     }
+}
+
+android {
+    sourceSets.named("test") {
+        kotlin.directories.add("tests")
+    }
+}
+
+// Source metadata is generated for the main variants; tests do not declare sources.
+tasks.matching { it.name.startsWith("ksp") && it.name.contains("UnitTest") }.configureEach {
+    enabled = false
+}
+
+dependencies {
+    testImplementation(libs.jsoup)
+    testImplementation(libs.okhttp.core)
+    testImplementation(libs.tachiyomi.lib.v14)
+    testImplementation(libs.rxjava)
+    testImplementation(libs.junit)
 }
