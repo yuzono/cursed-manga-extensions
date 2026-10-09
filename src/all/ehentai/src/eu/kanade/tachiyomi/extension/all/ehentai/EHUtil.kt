@@ -16,15 +16,6 @@ fun String?.nullIfBlank(): String? = if (isNullOrBlank()) {
 }
 
 /**
- * Ignores any exceptions thrown inside a block
- */
-fun <T> ignore(expr: () -> T): T? = try {
-    expr()
-} catch (t: Throwable) {
-    null
-}
-
-/**
  * Use '+' to append Strings onto a StringBuilder
  */
 operator fun StringBuilder.plusAssign(other: String) {
@@ -52,16 +43,17 @@ private const val GIB_FACTOR = 1024 * MIB_FACTOR
 /**
  * Parse human readable size Strings
  */
-fun parseHumanReadableByteCount(arg0: String): Double? {
-    val spaceNdx = arg0.indexOf(" ")
-    val ret = arg0.substring(0 until spaceNdx).toDouble()
-    when (arg0.substring(spaceNdx + 1)) {
-        "GB" -> return ret * GB_FACTOR
-        "GiB" -> return ret * GIB_FACTOR
-        "MB" -> return ret * MB_FACTOR
-        "MiB" -> return ret * MIB_FACTOR
-        "KB" -> return ret * KB_FACTOR
-        "KiB" -> return ret * KIB_FACTOR
+fun parseHumanReadableByteCount(value: String): Double? {
+    val amount = value.substringBefore(' ').toDoubleOrNull() ?: return null
+    val factor = when (value.substringAfter(' ')) {
+        "GB" -> GB_FACTOR
+        "GiB" -> GIB_FACTOR
+        "MB" -> MB_FACTOR
+        "MiB" -> MIB_FACTOR
+        "KB" -> KB_FACTOR
+        "KiB" -> KIB_FACTOR
+        "B" -> 1
+        else -> return null
     }
-    return null
+    return amount * factor
 }

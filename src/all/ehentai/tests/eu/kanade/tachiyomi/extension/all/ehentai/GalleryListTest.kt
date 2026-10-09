@@ -15,9 +15,9 @@ class GalleryListTest {
             <tr><td><a href="/g/2/abcdef/"><div class="glink">[Toratora] Gallery [AI Generated]</div></a></td></tr></table>
             """,
         )
-        assertEquals(listOf("tagged creator", "Toratora"), listing.galleries.map { it.toSManga().author })
-        assertEquals(listing.galleries.map { it.toSManga().author }, listing.galleries.map { it.toSManga().artist })
-        assertEquals(listOf(false, false), listing.galleries.map { it.toSManga().initialized })
+        assertEquals(listOf("tagged creator", "Toratora"), listing.galleries.map { it.author })
+        assertEquals(listing.galleries.map { it.author }, listing.galleries.map { it.artist })
+        assertEquals(listOf(false, false), listing.galleries.map { it.initialized })
     }
 
     @Test
@@ -34,7 +34,7 @@ class GalleryListTest {
         )
         assertEquals("Gallery one", listing.galleries.single().title)
         assertEquals("/g/1/abcdef/?nw=always", listing.galleries.single().url)
-        assertEquals("https://thumb.test/1.jpg", listing.galleries.single().thumbnailUrl)
+        assertEquals("https://thumb.test/1.jpg", listing.galleries.single().thumbnail_url)
     }
 
     @Test
@@ -50,7 +50,7 @@ class GalleryListTest {
             """,
         )
         assertEquals("Gallery two", listing.galleries.single().title)
-        assertEquals("https://thumb.test/2.jpg", listing.galleries.single().thumbnailUrl)
+        assertEquals("https://thumb.test/2.jpg", listing.galleries.single().thumbnail_url)
     }
 
     @Test
@@ -64,7 +64,7 @@ class GalleryListTest {
             """,
         )
         assertEquals("Gallery three", listing.galleries.single().title)
-        assertEquals("https://exhentai.org/thumb/3.jpg", listing.galleries.single().thumbnailUrl)
+        assertEquals("https://exhentai.org/thumb/3.jpg", listing.galleries.single().thumbnail_url)
     }
 
     @Test

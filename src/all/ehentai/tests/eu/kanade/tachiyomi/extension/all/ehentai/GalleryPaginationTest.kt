@@ -13,11 +13,50 @@ class GalleryPaginationTest {
     private val source = TestSource()
 
     @Test
+    fun abandonedSearchesAreBoundedAndEvictedResponsesCannotRestoreThem() {
+        val oldest = source.searchMangaRequest(1, "query0", FilterList())
+        parse(oldest, "https://exhentai.org/?next=0")
+        for (index in 1 until 1000) {
+            parse(source.searchMangaRequest(1, "query$index", FilterList()), "https://exhentai.org/?next=$index")
+        }
+        assertFalse(parse(oldest, "https://exhentai.org/?next=late").hasNextPage)
+        assertThrows(IOException::class.java) { source.searchMangaRequest(2, "query0", FilterList()) }
+        val retained = (0 until 1000).count { index ->
+            runCatching { source.searchMangaRequest(2, "query$index", FilterList()) }.isSuccess
+        }
+        assertEquals(16, retained)
+        assertEquals("999", source.searchMangaRequest(2, "query999", FilterList()).url.queryParameter("next"))
+    }
+
+    @Test
+    fun activelyUsedSearchSurvivesEvictionOfAbandonedSearches() {
+        parse(source.searchMangaRequest(1, "active", FilterList()), "https://exhentai.org/?next=active")
+        for (index in 0 until 1000) {
+            parse(source.searchMangaRequest(1, "query$index", FilterList()), "https://exhentai.org/?next=$index")
+            assertEquals("active", source.searchMangaRequest(2, "active", FilterList()).url.queryParameter("next"))
+        }
+    }
+
+    @Test
+    fun longSearchKeepsOnlyRecentPageCursorsIncludingTheCurrentRetry() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=2")
+        for (page in 2..1000) {
+            parse(source.searchMangaRequest(page, "query", FilterList()), "https://exhentai.org/?next=${page + 1}")
+        }
+        assertEquals("1000", source.searchMangaRequest(1000, "query", FilterList()).url.queryParameter("next"))
+        assertEquals("1001", source.searchMangaRequest(1001, "query", FilterList()).url.queryParameter("next"))
+        assertThrows(IOException::class.java) { source.searchMangaRequest(2, "query", FilterList()) }
+        assertEquals(8, (2..1001).count { page ->
+            runCatching { source.searchMangaRequest(page, "query", FilterList()) }.isSuccess
+        })
+    }
+
+    @Test
     fun overlappingSearchesKeepTheirOwnCursorsWhenResponsesArriveOutOfOrder() {
         val first = source.searchMangaRequest(1, "first", FilterList())
         val second = source.searchMangaRequest(1, "second", FilterList())
-        parse(second, "https://exhentai.org/?f_search=second&next=20&from=19")
-        parse(first, "https://exhentai.org/?f_search=first&next=10")
+        assertTrue(parse(second, "https://exhentai.org/?f_search=second&next=20&from=19").hasNextPage)
+        assertTrue(parse(first, "https://exhentai.org/?f_search=first&next=10").hasNextPage)
         assertEquals("second", source.searchMangaRequest(2, "second", FilterList()).url.queryParameter("f_search"))
         assertEquals("20", source.searchMangaRequest(2, "second", FilterList()).url.queryParameter("next"))
         assertEquals("19", source.searchMangaRequest(2, "second", FilterList()).url.queryParameter("from"))
@@ -50,8 +89,8 @@ class GalleryPaginationTest {
     fun refreshedSearchIgnoresALateFirstPageResponse() {
         val old = source.searchMangaRequest(1, "query", FilterList())
         val refreshed = source.searchMangaRequest(1, "query", FilterList())
-        parse(refreshed, "https://exhentai.org/?next=new")
-        parse(old, "https://exhentai.org/?next=old")
+        assertTrue(parse(refreshed, "https://exhentai.org/?next=new").hasNextPage)
+        assertFalse(parse(old, "https://exhentai.org/?next=old").hasNextPage)
         assertEquals("new", source.searchMangaRequest(2, "query", FilterList()).url.queryParameter("next"))
     }
 
@@ -61,7 +100,7 @@ class GalleryPaginationTest {
         val oldSecond = source.searchMangaRequest(2, "query", FilterList())
         parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=new2")
         parse(source.searchMangaRequest(2, "query", FilterList()), "https://exhentai.org/?next=new3")
-        parse(oldSecond, "https://exhentai.org/?next=old3")
+        assertFalse(parse(oldSecond, "https://exhentai.org/?next=old3").hasNextPage)
         assertEquals("new3", source.searchMangaRequest(3, "query", FilterList()).url.queryParameter("next"))
     }
 
@@ -72,6 +111,41 @@ class GalleryPaginationTest {
         parse(second, "https://exhentai.org/?next=third")
         assertEquals(second.url, source.searchMangaRequest(2, "query", FilterList()).url)
         assertEquals("third", source.searchMangaRequest(3, "query", FilterList()).url.queryParameter("next"))
+    }
+
+    @Test
+    fun aLateRetryCannotOverwriteANewerCursorOrFinishTheSearch() {
+        listOf("https://exhentai.org/?next=stale", null).forEach { staleNext ->
+            parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=second")
+            val firstAttempt = source.searchMangaRequest(2, "query", FilterList())
+            val retry = source.searchMangaRequest(2, "query", FilterList())
+            assertTrue(parse(retry, "https://exhentai.org/?next=new-third").hasNextPage)
+            assertFalse(parse(firstAttempt, staleNext).hasNextPage)
+            assertEquals("new-third", source.searchMangaRequest(3, "query", FilterList()).url.queryParameter("next"))
+        }
+    }
+
+    @Test
+    fun changingAnEarlierCursorInvalidatesLaterRequestsAndCursors() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=second")
+        parse(source.searchMangaRequest(2, "query", FilterList()), "https://exhentai.org/?next=old-third")
+        parse(source.searchMangaRequest(3, "query", FilterList()), "https://exhentai.org/?next=old-fourth")
+        val oldFourth = source.searchMangaRequest(4, "query", FilterList())
+
+        parse(source.searchMangaRequest(2, "query", FilterList()), "https://exhentai.org/?next=new-third")
+        assertFalse(parse(oldFourth, "https://exhentai.org/?next=old-fifth").hasNextPage)
+        assertThrows(IOException::class.java) { source.searchMangaRequest(4, "query", FilterList()) }
+        assertEquals("new-third", source.searchMangaRequest(3, "query", FilterList()).url.queryParameter("next"))
+    }
+
+    @Test
+    fun retryingAnUnchangedCursorPreservesThePendingNextPage() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=second")
+        parse(source.searchMangaRequest(2, "query", FilterList()), "https://exhentai.org/?next=third")
+        val pendingThird = source.searchMangaRequest(3, "query", FilterList())
+        parse(source.searchMangaRequest(2, "query", FilterList()), "https://exhentai.org/?next=third")
+        assertTrue(parse(pendingThird, "https://exhentai.org/?next=fourth").hasNextPage)
+        assertEquals("fourth", source.searchMangaRequest(4, "query", FilterList()).url.queryParameter("next"))
     }
 
     @Test
@@ -91,6 +165,51 @@ class GalleryPaginationTest {
     }
 
     @Test
+    fun completedSearchReleasesItsCursorsAndCanStartAgain() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=old")
+        val lastPage = source.searchMangaRequest(2, "query", FilterList())
+        assertFalse(parse(lastPage, null).hasNextPage)
+        assertThrows(IOException::class.java) { source.searchMangaRequest(2, "query", FilterList()) }
+
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=new")
+        assertEquals("new", source.searchMangaRequest(2, "query", FilterList()).url.queryParameter("next"))
+    }
+
+    @Test
+    fun completingOneSearchPreservesOtherSearchesAndLatestPagination() {
+        parse(source.searchMangaRequest(1, "completed", FilterList()), "https://exhentai.org/?next=last")
+        parse(source.searchMangaRequest(1, "active", FilterList()), "https://exhentai.org/?next=active")
+        htmlResponse(source.latestUpdatesRequest(1), listing("https://exhentai.org/?next=latest")).use {
+            source.latestUpdatesParse(it)
+        }
+
+        parse(source.searchMangaRequest(2, "completed", FilterList()), null)
+        assertEquals("active", source.searchMangaRequest(2, "active", FilterList()).url.queryParameter("next"))
+        assertEquals("latest", source.latestUpdatesRequest(2).url.queryParameter("next"))
+    }
+
+    @Test
+    fun oldFinalPageDoesNotRetireARefreshedSearch() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=old")
+        val oldLastPage = source.searchMangaRequest(2, "query", FilterList())
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=new")
+
+        parse(oldLastPage, null)
+        assertEquals("new", source.searchMangaRequest(2, "query", FilterList()).url.queryParameter("next"))
+    }
+
+    @Test
+    fun lateResponseCannotRestoreACompletedSearch() {
+        parse(source.searchMangaRequest(1, "query", FilterList()), "https://exhentai.org/?next=last")
+        val overlappingRequest = source.searchMangaRequest(2, "query", FilterList())
+        val lastPage = source.searchMangaRequest(2, "query", FilterList())
+        parse(lastPage, null)
+        assertFalse(parse(overlappingRequest, "https://exhentai.org/?next=late").hasNextPage)
+
+        assertThrows(IOException::class.java) { source.searchMangaRequest(3, "query", FilterList()) }
+    }
+
+    @Test
     fun popularUsesTheWebsitePopularPageAndReturnsItsGalleries() {
         val request = source.popularMangaRequest(1)
         assertEquals("/popular", request.url.encodedPath)
@@ -103,7 +222,6 @@ class GalleryPaginationTest {
     private fun parse(request: Request, next: String?) = htmlResponse(request, listing(next)).use {
         source.searchMangaParse(it).also { result ->
             assertEquals("Gallery", result.mangas.single().title)
-            if (next != null) assertTrue(result.hasNextPage)
         }
     }
 

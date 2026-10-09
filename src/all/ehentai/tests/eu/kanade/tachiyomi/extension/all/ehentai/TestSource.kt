@@ -1,13 +1,18 @@
 package eu.kanade.tachiyomi.extension.all.ehentai
 
 import eu.kanade.tachiyomi.source.model.FilterList
+import keiyoushi.utils.asJsoup
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 
-internal class TestSource(override val baseUrl: String = "https://exhentai.org") : EHentai() {
+internal class TestSource(
+    override val baseUrl: String = "https://exhentai.org",
+    override val client: OkHttpClient = OkHttpClient(),
+) : EHentai() {
     override val name = "E-Hentai"
     override val lang = "all"
 
@@ -19,6 +24,7 @@ internal class TestSource(override val baseUrl: String = "https://exhentai.org")
     public override fun popularMangaParse(response: Response) = super.popularMangaParse(response)
     public override fun mangaDetailsParse(response: Response) = super.mangaDetailsParse(response)
     public override fun chapterListParse(response: Response) = super.chapterListParse(response)
+    public override fun imageUrlParse(response: Response) = response.asJsoup().galleryImageUrl(response.request.url, false, true)
 }
 
 internal fun htmlResponse(request: Request, html: String): Response = Response.Builder()

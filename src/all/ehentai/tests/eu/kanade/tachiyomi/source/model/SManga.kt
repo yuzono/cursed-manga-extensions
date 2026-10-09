@@ -14,6 +14,9 @@ interface SManga {
     var initialized: Boolean
 
     companion object {
+        const val ONGOING = 1
+        const val COMPLETED = 2
+
         fun create(): SManga = object : SManga {
             override var url = ""
             override var title = ""

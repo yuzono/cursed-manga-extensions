@@ -13,62 +13,76 @@ internal class GalleryList(document: Document) {
         ?.absUrl("href")
         ?.takeIf(String::isNotBlank)
 
-    val galleries: List<Gallery> = document.select(".itg .glink").map { titleElement ->
+    val galleries: List<SManga> = document.select(".itg .glink").map { titleElement ->
         val galleryLink = titleElement.closest("a")!!
         val gallery = titleElement.closest("tr, .gl1t")!!
-        Gallery(
-            title = titleElement.text(),
-            creator = galleryCreator(titleElement.text(), gallery.select("[title^=artist:]").map { it.attr("title").removePrefix("artist:") }.distinct()),
-            url = ExGalleryMetadata.normalizeUrl(galleryLink.absUrl("href").toHttpUrl().encodedPath),
-            thumbnailUrl = gallery.selectFirst(".glthumb img, .gl1e img, .gl3t img")?.let {
+        SManga.create().apply {
+            title = titleElement.text()
+            val artists = gallery.select("[title^=artist:]").map { it.attr("title").removePrefix("artist:") }.distinct()
+            author = galleryCreator(title, artists)
+            artist = author
+            url = ExGalleryMetadata.normalizeUrl(galleryLink.absUrl("href").toHttpUrl().encodedPath)
+            thumbnail_url = gallery.selectFirst(".glthumb img, .gl1e img, .gl3t img")?.let {
                 it.attr("data-src").nullIfBlank() ?: it.absUrl("src").nullIfBlank()
-            },
-        )
-    }
-}
-
-internal class Gallery(val title: String, val url: String, val thumbnailUrl: String?, val creator: String?) {
-    fun toSManga() = SManga.create().apply {
-        title = this@Gallery.title
-        url = this@Gallery.url
-        thumbnail_url = thumbnailUrl
-        author = creator
-        artist = creator
+            }
+        }
     }
 }
 
 internal class GalleryPagination {
-    private class Session(val pages: MutableMap<Int, String> = mutableMapOf())
+    private class Cursor(val url: String) {
+        var request: PageRequest? = null
+    }
+
+    private class Session(firstPage: String) {
+        // Browsing only needs recent cursors for retries, not every previously loaded page.
+        val pages = object : LinkedHashMap<Int, Cursor>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Cursor>) = size > 8
+        }.apply { put(1, Cursor(firstPage)) }
+    }
     private class PageRequest(val key: String, val session: Session, val page: Int)
 
-    private val sessions = mutableMapOf<String, Session>()
+    private val sessions = object : LinkedHashMap<String, Session>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Session>): Boolean {
+            if (size <= 16) return false
+            eldest.value.pages.clear()
+            return true
+        }
+    }
 
     @Synchronized
     fun request(firstPage: Request, page: Int): Request {
         val key = firstPage.url.toString()
         val session = if (page == 1) {
-            Session(mutableMapOf(1 to key)).also { sessions[key] = it }
+            Session(key).also { sessions.put(key, it)?.pages?.clear() }
         } else {
             sessions[key]
         }
-        val url = session?.pages?.get(page)
+        val cursor = session?.pages?.get(page)
             ?: throw IOException("No next page cursor; refresh the list")
+        val request = PageRequest(key, session, page)
+        cursor.request = request
         return firstPage.newBuilder()
-            .url(url)
-            .tag(PageRequest::class.java, PageRequest(key, session, page))
+            .url(cursor.url)
+            .tag(PageRequest::class.java, request)
             .build()
     }
 
     @Synchronized
-    fun update(request: Request, nextPageUrl: String?) {
-        val page = request.tag(PageRequest::class.java) ?: return
-        // A response from before a refresh must not replace the new session's cursor.
-        if (sessions[page.key] !== page.session) return
+    fun update(request: Request, nextPageUrl: String?): Boolean {
+        val page = request.tag(PageRequest::class.java) ?: return false
+        // Refreshes and retries invalidate older responses, including within the same session.
+        if (sessions[page.key] !== page.session || page.session.pages[page.page]?.request !== page) return false
+        page.session.pages[page.page]?.request = null
         if (nextPageUrl == null) {
-            page.session.pages.remove(page.page + 1)
-        } else {
-            page.session.pages[page.page + 1] = nextPageUrl
+            // Retire only exhausted searches; interleaved searches may still be paged.
+            sessions.remove(page.key)
+            page.session.pages.clear()
+        } else if (page.session.pages[page.page + 1]?.url != nextPageUrl) {
+            page.session.pages.keys.removeAll { it > page.page }
+            page.session.pages[page.page + 1] = Cursor(nextPageUrl)
         }
+        return nextPageUrl != null
     }
 }
 

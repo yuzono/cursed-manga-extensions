@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.ehentai
 
-import android.annotation.SuppressLint
 import android.content.SharedPreferences
 import android.webkit.CookieManager
 import androidx.preference.CheckBoxPreference
@@ -21,8 +20,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
+import keiyoushi.utils.asJsoup
 import keiyoushi.utils.getPreferences
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.tryParseDateTime
@@ -30,7 +29,9 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
+import org.jsoup.nodes.Document
 import rx.Observable
+import rx.schedulers.Schedulers
 import java.time.ZoneOffset
 
 @Source
@@ -70,52 +71,69 @@ abstract class EHentai :
 
     private val latestPagination = GalleryPagination()
     private val searchPagination = GalleryPagination()
+    private val galleryPages = GalleryPageLoader()
 
     private fun genericMangaParse(response: Response, pagination: GalleryPagination? = null): MangasPage {
         val doc = response.asJsoup()
         val listing = GalleryList(doc)
-        pagination?.update(response.request, listing.nextPageUrl)
-        return MangasPage(listing.galleries.map { it.toSManga() }, pagination != null && listing.nextPageUrl != null)
+        val hasNextPage = pagination?.update(response.request, listing.nextPageUrl) == true
+        return MangasPage(listing.galleries, hasNextPage)
     }
 
     override fun chapterListRequest(manga: SManga) = exGet("$baseUrl${manga.url}")
 
-    override fun chapterListParse(response: Response): List<SChapter> = listOf(
+    override fun fetchMangaDetails(manga: SManga): Observable<SManga> = galleryPage(mangaDetailsRequest(manga), GalleryPageUse.DETAILS)
+        .map { mangaDetailsParse(it).apply { initialized = true } }
+
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = galleryPage(chapterListRequest(manga), GalleryPageUse.CHAPTERS)
+        .map(::chapterListParse)
+
+    override fun chapterListParse(response: Response): List<SChapter> = chapterListParse(response.asJsoup())
+
+    private fun chapterListParse(document: Document): List<SChapter> = listOf(
         SChapter.create().apply {
-            url = ExGalleryMetadata.normalizeUrl(response.request.url.encodedPath)
+            url = ExGalleryMetadata.normalizeUrl(document.location().toHttpUrl().encodedPath)
             name = "Chapter"
             chapter_number = 1f
-            date_upload = response.asJsoup().galleryPostedDate()
+            date_upload = document.galleryPostedDate()
         },
     )
 
-    override fun fetchPageList(chapter: SChapter) = fetchChapterPage(chapter, "$baseUrl${chapter.url}").map {
-        it.mapIndexed { i, s ->
-            Page(i, s)
-        }
-    }!!
+    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> = galleryPage(exGet("$baseUrl${chapter.url}"), GalleryPageUse.READER)
+        .map { it.galleryReaderPages() }
 
-    /**
-     * Recursively fetch chapter pages
-     */
-    private fun fetchChapterPage(
-        chapter: SChapter,
-        np: String,
-        pastUrls: List<String> = emptyList(),
-    ): Observable<List<String>> {
-        val urls = ArrayList(pastUrls)
-        return chapterPageCall(np).flatMap {
-            val jsoup = it.asJsoup()
-            urls += jsoup.galleryImagePages()
-            jsoup.nextGalleryPageUrl()?.let { string ->
-                fetchChapterPage(chapter, string, urls)
-            } ?: Observable.just(urls)
+    override fun fetchImageUrl(page: Page): Observable<String> {
+        val url = page.url.toHttpUrl()
+        val imagePage = if (url.pathSegments.firstOrNull() == "g") {
+            galleryPage(exGet(page.url), GalleryPageUse.IMAGE_PAGES)
+                .map { it.galleryImagePage(page.index) }
+        } else {
+            Observable.just(page.url)
+        }
+        return imagePage.flatMap { chapterPageCall(exGet(it)).map(::imageUrlParse) }
+    }
+
+    private fun galleryPage(request: Request, use: GalleryPageUse): Observable<Document> {
+        val key = request.url.newBuilder().removeAllQueryParameters("nw").build().toString()
+        return galleryPages.load(key, use) {
+            chapterPageCall(request).map { response ->
+                val document = response.asJsoup()
+                if (use == GalleryPageUse.IMAGE_PAGES) {
+                    val previews = document.getElementById("gdt")
+                    check(previews?.selectFirst("a[href]") != null) { "No image pages found" }
+                    // Retain only the previews needed for reading, not the gallery's tags and comments.
+                    Document(document.location()).apply { body().appendChild(previews) }
+                } else {
+                    document
+                }
+            }
         }
     }
 
-    private fun chapterPageCall(np: String) = client.newCall(chapterPageRequest(np)).asObservableSuccess()
-    private fun chapterPageRequest(np: String) = exGet(np)
+    private fun chapterPageCall(request: Request) = client.newCall(request).asObservableSuccess()
+        .subscribeOn(Schedulers.io())
 
+    // The website's Popular list has no next-page link.
     override fun popularMangaRequest(page: Int) = exGet("$baseUrl/popular")
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
@@ -132,84 +150,48 @@ abstract class EHentai :
 
     private fun exGet(url: String): Request = GET(url, headers)
 
-    /**
-     * Parse gallery page to metadata model
-     */
-    @SuppressLint("DefaultLocale")
-    override fun mangaDetailsParse(response: Response) = with(response.asJsoup()) {
-        with(ExGalleryMetadata()) {
-            url = ExGalleryMetadata.normalizeUrl(response.request.url.encodedPath)
-            title = select("#gn").text().nullIfBlank()?.trim()
+    override fun mangaDetailsParse(response: Response) = mangaDetailsParse(response.asJsoup())
 
-            altTitle = select("#gj").text().nullIfBlank()?.trim()
+    private fun mangaDetailsParse(document: Document) = with(document) {
+        with(ExGalleryMetadata()) {
+            url = ExGalleryMetadata.normalizeUrl(document.location().toHttpUrl().encodedPath)
+            title = getElementById("gn")?.text().nullIfBlank()
+
+            altTitle = getElementById("gj")?.text().nullIfBlank()
 
             // Thumbnail is set as background of element in style attribute
-            thumbnailUrl = select("#gd1 div").attr("style").nullIfBlank()?.let {
+            thumbnailUrl = selectFirst("#gd1 div")?.attr("style").nullIfBlank()?.let {
                 it.substring(it.indexOf('(') + 1 until it.lastIndexOf(')'))
             }
-            category = select("#gdc div").text().nullIfBlank()?.trim()?.lowercase()
+            category = selectFirst("#gdc div")?.text().nullIfBlank()?.lowercase()
 
-            uploader = select("#gdn").text().nullIfBlank()?.trim()
+            uploader = getElementById("gdn")?.text().nullIfBlank()
 
-            // Parse the table
-            select("#gdd tr").forEach {
-                it.select(".gdt1")
-                    .text()
-                    .nullIfBlank()
-                    ?.trim()
-                    ?.let { left ->
-                        it.select(".gdt2")
-                            .text()
-                            .nullIfBlank()
-                            ?.trim()
-                            ?.let { right ->
-                                ignore {
-                                    when (
-                                        left.removeSuffix(":")
-                                            .lowercase()
-                                    ) {
-                                        "posted" -> datePosted = EX_DATE_FORMAT.tryParseDateTime(right, ZoneOffset.UTC)
-
-                                        "visible" -> visible = right.nullIfBlank()
-
-                                        "language" -> {
-                                            language = right.removeSuffix(TR_SUFFIX).trim().nullIfBlank()
-                                            translated = right.endsWith(TR_SUFFIX, true)
-                                        }
-
-                                        "file size" -> size = parseHumanReadableByteCount(right)?.toLong()
-
-                                        "length" -> length = right.removeSuffix("pages").trim().nullIfBlank()?.toInt()
-
-                                        "favorited" -> favorites = right.removeSuffix("times").trim().nullIfBlank()?.toInt()
-                                    }
-                                }
-                            }
+            select("#gdd tr").forEach { row ->
+                val label = row.selectFirst(".gdt1")?.text()?.removeSuffix(":")?.lowercase()
+                val value = row.selectFirst(".gdt2")?.text().nullIfBlank() ?: return@forEach
+                when (label) {
+                    "posted" -> datePosted = EX_DATE_FORMAT.tryParseDateTime(value, ZoneOffset.UTC)
+                    "visible" -> visible = value
+                    "language" -> {
+                        language = value.removeSuffix(TR_SUFFIX).trim().nullIfBlank()
+                        translated = value.endsWith(TR_SUFFIX, true)
                     }
+                    "file size" -> size = parseHumanReadableByteCount(value)?.toLong()
+                    "length" -> length = value.substringBefore(' ').replace(",", "").toIntOrNull()
+                    "favorited" -> favorites = value.substringBefore(' ').replace(",", "").toIntOrNull()
+                }
             }
 
-            // Parse ratings
-            ignore {
-                averageRating = select("#rating_label")
-                    .text()
-                    .removePrefix("Average:")
-                    .trim()
-                    .nullIfBlank()
-                    ?.toDouble()
-                ratingCount = select("#rating_count")
-                    .text()
-                    .trim()
-                    .nullIfBlank()
-                    ?.toInt()
-            }
+            averageRating = getElementById("rating_label")?.text()?.removePrefix("Average:")?.trim()?.toDoubleOrNull()
+            ratingCount = getElementById("rating_count")?.text()?.replace(",", "")?.toIntOrNull()
 
             // Parse tags
-            tags.clear()
             select("#taglist tr").forEach {
                 val namespace = it.select(".tc").text().removeSuffix(":")
                 val currentTags = it.select("div").map { element ->
                     Tag(
-                        element.text().trim(),
+                        element.text(),
                         element.hasClass("gtl"),
                     )
                 }
@@ -224,11 +206,11 @@ abstract class EHentai :
         }
     }
 
-    private fun searchMangaByIdRequest(id: String) = GET("$baseUrl/g/$id", headers)
+    private fun searchMangaByIdRequest(id: String) = exGet("$baseUrl/g/${id.trimEnd('/')}/")
 
-    private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
-        val details = mangaDetailsParse(response)
-        details.url = ExGalleryMetadata.normalizeUrl("/g/$id/")
+    private fun searchMangaByIdParse(document: Document): MangasPage {
+        val details = mangaDetailsParse(document)
+        details.initialized = true
         return MangasPage(listOf(details), false)
     }
 
@@ -242,9 +224,8 @@ abstract class EHentai :
         fetchSearchManga(page, "${PREFIX_ID_SEARCH}$id/$key", filters)
     } else if (query.startsWith(PREFIX_ID_SEARCH)) {
         val id = query.removePrefix(PREFIX_ID_SEARCH)
-        client.newCall(searchMangaByIdRequest(id))
-            .asObservableSuccess()
-            .map { response -> searchMangaByIdParse(response, id) }
+        galleryPage(searchMangaByIdRequest(id), GalleryPageUse.DETAILS)
+            .map(::searchMangaByIdParse)
     } else {
         super.fetchSearchManga(page, query, filters)
     }
@@ -259,25 +240,7 @@ abstract class EHentai :
     override val client by lazy {
         network.client.newBuilder()
             .addGalleryCookies(::getGalleryCredentials)
-            .addInterceptor { chain ->
-                val request = chain.request()
-                val result = runCatching { chain.proceed(request) }
-                val bakUrl = request.url.fragment
-                    ?: return@addInterceptor result.getOrThrow()
-
-                if (result.isFailure || result.getOrNull()?.isSuccessful != true) {
-                    result.getOrNull()?.close()
-                    val newRequest = GET(bakUrl, headers)
-                    val newImageUrl = imageUrlParse(chain.proceed(newRequest), false)
-                    val newImageRequest = request.newBuilder()
-                        .url(newImageUrl)
-                        .build()
-
-                    chain.proceed(newImageRequest)
-                } else {
-                    result.getOrThrow()
-                }
-            }
+            .addGalleryImageRetry({ headers }) { imageUrlParse(it, false) }
             .build()
     }
 
@@ -292,7 +255,7 @@ abstract class EHentai :
         AdvancedGroup(),
     )
 
-    internal open class TextFilter(name: String, val type: String, val specific: String = "") : Text(name)
+    internal class TextFilter(name: String, val type: String) : Text(name)
 
     class GenreOption(name: String, val mask: Int) : CheckBox(name, false)
 
@@ -361,7 +324,6 @@ abstract class EHentai :
         }
     }
 
-    // Explicit type arg for listOf() to workaround this: KT-16570
     class AdvancedGroup :
         UriGroup<Filter<*>>(
             "Advanced Options",

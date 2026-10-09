@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.source.online
 
 import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -29,15 +31,17 @@ abstract class HttpSource : CatalogueSource {
     abstract fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request
     abstract fun searchMangaParse(response: Response): MangasPage
     abstract fun mangaDetailsParse(response: Response): SManga
+    open fun mangaDetailsRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
     open fun chapterListRequest(manga: SManga): Request = error("Not used")
     abstract fun chapterListParse(response: Response): List<SChapter>
     abstract fun pageListParse(response: Response): List<Page>
     abstract fun imageUrlParse(response: Response): String
 
-    override fun fetchPopularManga(page: Int): Observable<MangasPage> = error("Not used")
-    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> = error("Not used")
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = error("Not used")
+    override fun fetchPopularManga(page: Int): Observable<MangasPage> = client.newCall(popularMangaRequest(page)).asObservableSuccess().map(::popularMangaParse)
+    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> = client.newCall(latestUpdatesRequest(page)).asObservableSuccess().map(::latestUpdatesParse)
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = client.newCall(searchMangaRequest(page, query, filters)).asObservableSuccess().map(::searchMangaParse)
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> = error("Not used")
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = error("Not used")
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> = error("Not used")
+    open fun fetchImageUrl(page: Page): Observable<String> = error("Not used")
 }
