@@ -1,10 +1,10 @@
 package eu.kanade.tachiyomi.extension.all.ehentai
 
-import android.net.Uri
+import okhttp3.HttpUrl
 
 /**
  * Uri filter
  */
 interface UriFilter {
-    fun addToUri(builder: Uri.Builder)
+    fun addToUri(builder: HttpUrl.Builder)
 }
