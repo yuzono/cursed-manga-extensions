@@ -410,6 +410,14 @@ abstract class EHentai :
         return "$imgUrl#$bakUrl"
     }
 
+    private fun Response.hasValidImageHeader(): Boolean {
+        val header = peekBody(IMAGE_HEADER_SIZE).bytes()
+        return IMAGE_SIGNATURES.any { header.startsWith(it) } ||
+            (header.startsWith(RIFF_SIGNATURE) && header.startsWith(WEBP_SIGNATURE, 8))
+    }
+
+    private fun ByteArray.startsWith(signature: ByteArray, offset: Int = 0): Boolean = size >= offset + signature.size && signature.indices.all { this[offset + it] == signature[it] }
+
     private val cookiesHeader by lazy {
         val cookies = mutableMapOf<String, String>()
 
@@ -461,8 +469,12 @@ abstract class EHentai :
             val bakUrl = request.url.fragment
                 ?: return@addInterceptor result.getOrThrow()
 
-            if (result.isFailure || result.getOrNull()?.isSuccessful != true) {
-                result.getOrNull()?.close()
+            val response = result.getOrNull()
+            val isUsableImage = response?.isSuccessful == true &&
+                runCatching { response.hasValidImageHeader() }.getOrDefault(false)
+
+            if (!isUsableImage) {
+                response?.close()
                 val newRequest = GET(bakUrl, headers)
                 val newImageUrl = imageUrlParse(chain.proceed(newRequest), false)
                 val newImageRequest = request.newBuilder()
@@ -640,6 +652,16 @@ abstract class EHentai :
         const val QUERY_PREFIX = "?f_apply=Apply+Filter"
         const val PREFIX_ID_SEARCH = "id:"
         const val TR_SUFFIX = "TR"
+
+        private const val IMAGE_HEADER_SIZE = 12L
+        private val IMAGE_SIGNATURES = listOf(
+            byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()),
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
+            "GIF87a".toByteArray(),
+            "GIF89a".toByteArray(),
+        )
+        private val RIFF_SIGNATURE = "RIFF".toByteArray()
+        private val WEBP_SIGNATURE = "WEBP".toByteArray()
 
         // Preferences vals
         private const val ENFORCE_LANGUAGE_PREF_KEY = "ENFORCE_LANGUAGE"
