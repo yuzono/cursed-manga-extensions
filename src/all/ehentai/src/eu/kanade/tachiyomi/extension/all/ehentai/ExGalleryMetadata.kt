@@ -44,10 +44,9 @@ class ExGalleryMetadata {
 
         fun galleryId(url: String) = splitGalleryUrl(url)[1]
 
-        private fun galleryToken(url: String) = splitGalleryUrl(url)[2]
-
-        private fun normalizeUrl(id: String, token: String) = "/g/$id/$token/?nw=always"
-
-        fun normalizeUrl(url: String) = normalizeUrl(galleryId(url), galleryToken(url))
+        fun normalizeUrl(url: String): String {
+            val segments = splitGalleryUrl(url)
+            return "/g/${segments[1]}/${segments[2]}/?nw=always"
+        }
     }
 }

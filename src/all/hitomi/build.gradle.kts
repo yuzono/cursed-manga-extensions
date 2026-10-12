@@ -6,20 +6,30 @@ plugins {
 
 keiyoushi {
     name = "Hitomi"
-    versionCode = 41
+    versionCode = 43
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
 
-    listOf(
-        "all", "en", "id", "jv", "ca",
-        "ceb", "cs", "da", "de", "et",
-        "es", "eo", "fr", "it", "hi",
-        "hu", "pl", "pt", "vi", "tr",
-        "ru", "uk", "ar", "ko", "zh", "ja",
-    ).forEach { sourceLang ->
-        source {
-            lang = sourceLang
-            baseUrl = "https://hitomi.la"
-        }
+    source {
+        id = 690123758188633713
+        lang = "all"
+        baseUrl = "https://hitomi.la"
     }
+}
+
+android {
+    sourceSets.named("test") {
+        kotlin.directories.add("tests")
+    }
+}
+
+tasks.matching { it.name.startsWith("ksp") && it.name.contains("UnitTest") }.configureEach {
+    enabled = false
+}
+
+dependencies {
+    testImplementation(libs.junit)
+    testImplementation(libs.rxjava)
+    testImplementation(libs.kotlin.json)
+    testImplementation(libs.tachiyomi.lib.v14)
 }

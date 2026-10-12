@@ -1,12 +1,24 @@
 package eu.kanade.tachiyomi.extension.all.ehentai
 
 import eu.kanade.tachiyomi.source.model.SManga
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val EH_ARTIST_NAMESPACE = "artist"
-private const val EH_AUTHOR_NAMESPACE = "author"
+
+private val TITLE_CREDIT = Regex("^(?:\\([^)]*\\)\\s*)?\\[([^\\[\\]]+)]\\s+\\S")
+private val CIRCLE_ARTIST = Regex("^.+?\\s*\\(([^()]+)\\)$")
+private val NON_CREATOR_CREDITS = setOf("anthology", "various", "various artists", "unknown", "ai generated")
+
+internal fun galleryCreator(title: String, artists: List<String>): String? {
+    if (artists.isNotEmpty()) return artists.joinToString()
+    // EH titles use [Artist] or (Convention) [Circle (Artist)] when creator tags are missing.
+    val credit = TITLE_CREDIT.find(title)?.groupValues?.get(1)?.trim() ?: return null
+    if (credit.lowercase() in NON_CREATOR_CREDITS) return null
+    return CIRCLE_ARTIST.matchEntire(credit)?.groupValues?.get(1) ?: credit
+}
 
 private val ONGOING_SUFFIX = arrayOf(
     "[ongoing]",
@@ -14,7 +26,8 @@ private val ONGOING_SUFFIX = arrayOf(
     "{ongoing}",
 )
 
-val EX_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+val EX_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.US)
+    .withZone(ZoneOffset.UTC)
 
 fun ExGalleryMetadata.copyTo(manga: SManga) {
     url?.let { manga.url = it }
@@ -22,14 +35,9 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
 
     (title ?: altTitle)?.let { manga.title = it }
 
-    // Set artist (if we can find one)
-    tags[EH_ARTIST_NAMESPACE]?.let {
-        if (it.isNotEmpty()) manga.artist = it.joinToString(transform = Tag::name)
-    }
-    // Set author (if we can find one)
-    tags[EH_AUTHOR_NAMESPACE]?.let {
-        if (it.isNotEmpty()) manga.author = it.joinToString(transform = Tag::name)
-    }
+    val creator = galleryCreator(manga.title, tags[EH_ARTIST_NAMESPACE].orEmpty().map(Tag::name))
+    manga.artist = creator
+    manga.author = creator
 
     // Build genre from all tag namespaces
     // Format: "namespace:tagname" so each chip is distinct and clickable as a valid EH search query.
@@ -60,7 +68,7 @@ fun ExGalleryMetadata.copyTo(manga: SManga) {
 
     val detailsDesc = StringBuilder()
     uploader?.let { detailsDesc += "Uploader: $it\n" }
-    datePosted?.let { detailsDesc += "Posted: ${EX_DATE_FORMAT.format(Date(it))}\n" }
+    datePosted?.let { detailsDesc += "Posted: ${EX_DATE_FORMAT.format(Instant.ofEpochMilli(it))}\n" }
     visible?.let { detailsDesc += "Visible: $it\n" }
     category?.let { detailsDesc += "Category: $it\n" }
     language?.let {
