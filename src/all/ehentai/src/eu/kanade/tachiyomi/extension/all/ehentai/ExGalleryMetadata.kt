@@ -42,6 +42,8 @@ class ExGalleryMetadata {
             pathSegments.filterNot(String::isNullOrBlank)
         }
 
+        fun hasToken(url: String) = splitGalleryUrl(url).size >= 3
+
         fun galleryId(url: String) = splitGalleryUrl(url)[1]
 
         private fun galleryToken(url: String) = splitGalleryUrl(url)[2]

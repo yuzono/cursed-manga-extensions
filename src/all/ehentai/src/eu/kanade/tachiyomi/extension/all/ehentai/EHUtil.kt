@@ -25,13 +25,6 @@ fun <T> ignore(expr: () -> T): T? = try {
 }
 
 /**
- * Use '+' to append Strings onto a StringBuilder
- */
-operator fun StringBuilder.plusAssign(other: String) {
-    append(other)
-}
-
-/**
  * Converts bytes into a human readable String
  */
 fun humanReadableByteCount(bytes: Long, si: Boolean): String {
