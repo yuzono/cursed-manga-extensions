@@ -267,17 +267,31 @@ abstract class Hentai2Read :
         }
     }
 
-    private fun parseChapters(document: Document): List<SChapter> = document.select("li[id^=chapter-]").map { li ->
-        val link = li.selectFirst("a[href^=/reader/]")!!
-        // Without a number span, the first span is the badge or date.
-        val number = li.selectFirst("span")?.text()?.takeIf { it.toFloatOrNull() != null }
+    private fun parseChapters(document: Document): List<SChapter> {
+        val jsonChapters = document.parsePageDataOrNull<BookPageDto>()?.chapters.orEmpty()
+        if (jsonChapters.isNotEmpty()) {
+            return jsonChapters.map { chapter ->
+                SChapter.create().apply {
+                    setUrlWithoutDomain(chapter.url)
+                    name = if (chapter.number.isNotEmpty()) "Ch. ${chapter.number} - ${chapter.title}" else chapter.title
+                    chapter_number = chapter.number.toFloatOrNull() ?: -1f
+                    date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
+                }
+            }
+        }
 
-        SChapter.create().apply {
-            setUrlWithoutDomain(link.absUrl("href"))
-            name = if (number != null) "Ch. $number - ${link.text()}" else link.text()
-            chapter_number = number?.toFloat() ?: -1f
-            // A "New" badge span can sit between the title and the date, so take the last span.
-            date_upload = dateFormat.tryParseDate(li.selectLast("a[href^=/reader/] ~ span")?.text(), ZoneOffset.UTC)
+        return document.select("li[id^=chapter-]").map { li ->
+            val link = li.selectFirst("a[href^=/reader/]")!!
+            // Without a number span, the first span is the badge or date.
+            val number = li.selectFirst("span")?.text()?.takeIf { it.toFloatOrNull() != null }
+
+            SChapter.create().apply {
+                setUrlWithoutDomain(link.absUrl("href"))
+                name = if (number != null) "Ch. $number - ${link.text()}" else link.text()
+                chapter_number = number?.toFloat() ?: -1f
+                // A "New" badge span can sit between the title and the date, so take the last span.
+                date_upload = dateFormat.tryParseDate(li.selectLast("a[href^=/reader/] ~ span")?.text(), ZoneOffset.UTC)
+            }
         }
     }
 
