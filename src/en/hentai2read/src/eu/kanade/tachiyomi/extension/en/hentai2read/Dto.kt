@@ -61,12 +61,24 @@ class TagDto(
 @Serializable
 class BookPageDto(private val props: Props) {
     @Serializable
-    class Props(val book: Book)
+    class Props(
+        val book: Book,
+        val chapters: List<Chapter> = emptyList(),
+    )
 
     @Serializable
     class Book(val id: Int)
 
+    @Serializable
+    class Chapter(
+        val number: String,
+        val title: String,
+        val url: String,
+        val date: String? = null,
+    )
+
     val id get() = props.book.id
+    val chapters get() = props.chapters
 }
 
 @Serializable

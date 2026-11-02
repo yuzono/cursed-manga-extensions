@@ -109,7 +109,8 @@ abstract class Hentai2Read :
         val document = client.get(url).asJsoup()
         if (document.selectFirst(TITLE_SELECTOR) == null) return null
         return parseMangaDetails(document, document.singleChapterPages()).apply {
-            setUrlWithoutDomain(document.selectFirst("link[rel=canonical]")!!.absUrl("href"))
+            val canonical = document.selectFirst("link[rel=canonical]")?.absUrl("href").orEmpty()
+            setUrlWithoutDomain(canonical.ifEmpty { url.toString() })
         }
     }
 
@@ -262,16 +263,30 @@ abstract class Hentai2Read :
         }
     }
 
-    private fun parseChapters(document: Document): List<SChapter> = document.select("li[id^=chapter-]").map { li ->
-        val link = li.selectFirst("a[href^=/reader/]")!!
-        val number = li.selectFirst("span")?.text().orEmpty()
+    private fun parseChapters(document: Document): List<SChapter> {
+        val jsonChapters = document.parsePageDataOrNull<BookPageDto>()?.chapters.orEmpty()
+        if (jsonChapters.isNotEmpty()) {
+            return jsonChapters.map { chapter ->
+                SChapter.create().apply {
+                    setUrlWithoutDomain(chapter.url)
+                    name = if (chapter.number.isNotEmpty()) "Ch. ${chapter.number} - ${chapter.title}" else chapter.title
+                    chapter_number = chapter.number.toFloatOrNull() ?: -1f
+                    date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
+                }
+            }
+        }
 
-        SChapter.create().apply {
-            setUrlWithoutDomain(link.absUrl("href"))
-            name = if (number.isNotEmpty()) "Ch. $number - ${link.text()}" else link.text()
-            chapter_number = number.toFloatOrNull() ?: -1f
-            // A "New" badge span can sit between the title and the date, so take the last span.
-            date_upload = dateFormat.tryParseDate(li.selectLast("a[href^=/reader/] ~ span")?.text(), ZoneOffset.UTC)
+        return document.select("li[id^=chapter-]").map { li ->
+            val link = li.selectFirst("a[href^=/reader/]")!!
+            val number = li.selectFirst("span")?.text().orEmpty()
+
+            SChapter.create().apply {
+                setUrlWithoutDomain(link.absUrl("href"))
+                name = if (number.isNotEmpty()) "Ch. $number - ${link.text()}" else link.text()
+                chapter_number = number.toFloatOrNull() ?: -1f
+                // A "New" badge span can sit between the title and the date, so take the last span.
+                date_upload = dateFormat.tryParseDate(li.selectLast("a[href^=/reader/] ~ span")?.text(), ZoneOffset.UTC)
+            }
         }
     }
 
