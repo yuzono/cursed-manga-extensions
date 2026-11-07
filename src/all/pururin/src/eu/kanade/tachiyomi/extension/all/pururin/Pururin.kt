@@ -125,7 +125,8 @@ abstract class Pururin : KeiSource() {
             .mapNotNull { element ->
                 SChapter.create().apply {
                     name = element.textOrNull() ?: return@mapNotNull null
-                    setUrlWithoutDomain(element.absUrl("href"))
+                    val href = element.absUrl("href").ifEmpty { return@mapNotNull null }
+                    setUrlWithoutDomain(href)
                 }
             }
             .reversed()
