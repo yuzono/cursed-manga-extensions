@@ -121,22 +121,26 @@ abstract class Pururin : KeiSource() {
         val details = parseDetails(document, manga.url)
 
         val chapterLinks = document.select(".table-collection tbody tr a")
-        val chapterList = if (chapterLinks.isEmpty()) {
-            listOf(
+        val parsed = chapterLinks
+            .mapNotNull { element ->
                 SChapter.create().apply {
-                    url = manga.url
-                    name = "Chapter"
-                },
-            )
-        } else {
-            chapterLinks
-                .mapNotNull { element ->
-                    SChapter.create().apply {
-                        name = element.textOrNull() ?: return@mapNotNull null
-                        setUrlWithoutDomain(element.absUrl("href"))
-                    }
+                    name = element.textOrNull() ?: return@mapNotNull null
+                    setUrlWithoutDomain(element.absUrl("href"))
                 }
-                .reversed()
+            }
+            .reversed()
+
+        val chapterList = if (parsed.isNotEmpty() && (parsed.size == chapterLinks.size || chapters.isEmpty())) {
+            parsed
+        } else {
+            chapters.ifEmpty {
+                listOf(
+                    SChapter.create().apply {
+                        url = manga.url
+                        name = "Chapter"
+                    },
+                )
+            }
         }
 
         return SMangaUpdate(details, chapterList)
