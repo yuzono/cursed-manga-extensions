@@ -552,8 +552,8 @@ abstract class Hitomi : KeiSource() {
         }
 
         return SMangaUpdate(
-            manga = if (fetchDetails) gallery.toSManga() else manga,
-            chapters = if (fetchChapters) listOf(chapter) else chapters,
+            manga = gallery.toSManga(),
+            chapters = listOf(chapter),
         )
     }
 
