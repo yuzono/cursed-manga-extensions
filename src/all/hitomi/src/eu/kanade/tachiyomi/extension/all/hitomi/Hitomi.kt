@@ -314,15 +314,16 @@ abstract class Hitomi : KeiSource() {
             }
 
             val key = hashTerm(it)
-            val node = getGalleryNodeAtAddress(0)
-            val data = bSearch(key, node) ?: return emptySet()
+            val version = galleriesIndexVersion()
+            val node = getGalleryNodeAtAddress(0, version)
+            val data = bSearch(key, node, version) ?: return emptySet()
 
-            return getGalleryIDsFromData(data)
+            return getGalleryIDsFromData(data, version)
         }
     }
 
-    private suspend fun getGalleryIDsFromData(data: Pair<Long, Int>): Set<Int> {
-        val url = "$ltnUrl/galleriesindex/galleries.${galleriesIndexVersion()}.data"
+    private suspend fun getGalleryIDsFromData(data: Pair<Long, Int>, version: String): Set<Int> {
+        val url = "$ltnUrl/galleriesindex/galleries.$version.data"
         val (offset, length) = data
         require(length in 1..100000000) {
             "Length $length is too long"
@@ -359,6 +360,7 @@ abstract class Hitomi : KeiSource() {
     private tailrec suspend fun bSearch(
         key: UByteArray,
         node: Node,
+        version: String,
     ): Pair<Long, Int>? {
         fun compareArrayBuffers(
             dv1: UByteArray,
@@ -413,8 +415,8 @@ abstract class Hitomi : KeiSource() {
             return null
         }
 
-        val nextNode = getGalleryNodeAtAddress(node.subNodeAddresses[where])
-        return bSearch(key, nextNode)
+        val nextNode = getGalleryNodeAtAddress(node.subNodeAddresses[where], version)
+        return bSearch(key, nextNode, version)
     }
 
     private suspend fun getGalleryIDsFromNozomi(
@@ -448,11 +450,16 @@ abstract class Hitomi : KeiSource() {
 
     private val indexVersionMutex = Mutex()
     private var indexVersion: String? = null
+    private var indexVersionRetrieval = 0L
 
     private suspend fun galleriesIndexVersion(): String = indexVersionMutex.withLock {
-        indexVersion ?: client.get("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}")
-            .use { it.body.string() }
-            .also { indexVersion = it }
+        indexVersion?.takeIf { indexVersionRetrieval + 60000 > System.currentTimeMillis() }
+            ?: client.get("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}")
+                .use { it.body.string() }
+                .also {
+                    indexVersion = it
+                    indexVersionRetrieval = System.currentTimeMillis()
+                }
     }
 
     private data class Node(
@@ -503,8 +510,8 @@ abstract class Hitomi : KeiSource() {
         return Node(keys, datas, subNodeAddresses)
     }
 
-    private suspend fun getGalleryNodeAtAddress(address: Long): Node {
-        val url = "$ltnUrl/galleriesindex/galleries.${galleriesIndexVersion()}.index"
+    private suspend fun getGalleryNodeAtAddress(address: Long, version: String): Node {
+        val url = "$ltnUrl/galleriesindex/galleries.$version.index"
 
         val nodedata = getRangedResponse(url, address.until(address + 464))
 
