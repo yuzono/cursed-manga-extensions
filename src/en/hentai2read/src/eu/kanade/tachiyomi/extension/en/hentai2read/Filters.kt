@@ -79,7 +79,7 @@ internal fun hentai2readFilters(tags: List<TagDto>): FilterList {
     val filters = buildList<Filter<*>> {
         add(Filter.Header("Search also takes artist:name, tag:name and -tag:name. Quote names with spaces: artist:\"two words\""))
         add(Filter.Separator())
-        add(Filter.Header("Without search text, a ranking, or a single included tag or artist, opens its own page; a ranking ignores the other filters"))
+        add(Filter.Header("With no search text, a ranking or a single included tag/artist opens its own page. Rankings ignore the other filters."))
         add(RankingFilter())
         add(Filter.Separator())
         add(TypeFilter())

@@ -78,7 +78,8 @@ class ReaderDto(private val props: Props) {
         val avif: List<String?> = emptyList(),
     )
 
-    // `avif` repeats the same pages (or is all null), so only one list is used.
-    fun toPages(): List<Page> = props.images.filterNotNull().ifEmpty { props.avif.filterNotNull() }
+    // `avif` holds the same pages by index, so it fills any page missing from `images`.
+    fun toPages(): List<Page> = (0 until maxOf(props.images.size, props.avif.size))
+        .mapNotNull { props.images.getOrNull(it) ?: props.avif.getOrNull(it) }
         .mapIndexed { index, url -> Page(index, imageUrl = if (url.startsWith("//")) "https:$url" else url) }
 }
