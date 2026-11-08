@@ -693,7 +693,7 @@ abstract class Hitomi : KeiSource() {
     }
 }
 
-private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX", Locale.ENGLISH)
+private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS][.SS][.S]X", Locale.ENGLISH)
 
 private val WHITESPACE_REGEX = Regex("\\s+")
 private val SUBDOMAIN_DEFAULT_REGEX = Regex("var o = (\\d)")
