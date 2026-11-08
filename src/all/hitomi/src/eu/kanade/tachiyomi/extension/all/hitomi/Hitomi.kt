@@ -12,7 +12,7 @@ import keiyoushi.annotation.Source
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.parseAs
-import keiyoushi.utils.tryParseDateTime
+import keiyoushi.utils.tryParseZonedDateTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -550,7 +550,7 @@ abstract class Hitomi : KeiSource() {
             name = "Chapter"
             url = gallery.galleryurl
             scanlator = gallery.type
-            date_upload = dateFormat.tryParseDateTime(gallery.date.replace(TIMEZONE_SUFFIX_REGEX, ""))
+            date_upload = dateFormat.tryParseZonedDateTime(gallery.date)
         }
 
         return SMangaUpdate(
@@ -687,10 +687,9 @@ abstract class Hitomi : KeiSource() {
     }
 }
 
-private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
+private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX", Locale.ENGLISH)
 
 private val WHITESPACE_REGEX = Regex("\\s+")
-private val TIMEZONE_SUFFIX_REGEX = Regex("""(?<=:\d{2})[+-]\d{2}(?::?\d{2})?$""")
 private val SUBDOMAIN_DEFAULT_REGEX = Regex("var o = (\\d)")
 private val SUBDOMAIN_BREAK_REGEX = Regex("o = (\\d); break;")
 private val SUBDOMAIN_CASE_REGEX = Regex("case (\\d+):")
