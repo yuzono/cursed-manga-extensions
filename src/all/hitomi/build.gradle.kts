@@ -22,4 +22,16 @@ keiyoushi {
             baseUrl = "https://hitomi.la"
         }
     }
+
+    deeplink {
+        host("hitomi.la")
+        path("/doujinshi/..*")
+        path("/manga/..*")
+        path("/cg/..*")
+        path("/gamecg/..*")
+        path("/imageset/..*")
+        path("/anime/..*")
+        path("/galleries/..*")
+        path("/reader/..*")
+    }
 }
