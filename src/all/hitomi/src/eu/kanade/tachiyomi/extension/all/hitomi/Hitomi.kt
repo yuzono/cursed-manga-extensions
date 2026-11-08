@@ -589,7 +589,6 @@ abstract class Hitomi : KeiSource() {
         return Request.Builder()
             .url(page.imageUrl!!)
             .headers(imageHeaders)
-            .get()
             .build()
     }
 
