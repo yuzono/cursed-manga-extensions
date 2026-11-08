@@ -346,6 +346,7 @@ abstract class Hitomi : KeiSource() {
             "inbuf.byteLength ${inbuf.size} != expected_length $expectedLength"
         }
 
+        // we know total number so avoid internal resize overhead
         val galleryIDs = LinkedHashSet<Int>(numberOfGalleryIDs, 1.0f)
 
         for (i in 0.until(numberOfGalleryIDs)) {
@@ -435,6 +436,7 @@ abstract class Hitomi : KeiSource() {
 
         val size = arrayBuffer.remaining() / Int.SIZE_BYTES
 
+        // we know total number so avoid internal resize overhead
         val nozomi = LinkedHashSet<Int>(size, 1.0f)
 
         while (arrayBuffer.hasRemaining()) {
