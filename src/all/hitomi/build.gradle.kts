@@ -6,9 +6,9 @@ plugins {
 
 keiyoushi {
     name = "Hitomi"
-    versionCode = 41
+    versionCode = 42
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.4"
+    libVersion = "1.6"
 
     listOf(
         "all", "en", "id", "jv", "ca",
@@ -21,5 +21,17 @@ keiyoushi {
             lang = sourceLang
             baseUrl = "https://hitomi.la"
         }
+    }
+
+    deeplink {
+        host("hitomi.la")
+        path("/doujinshi/..*")
+        path("/manga/..*")
+        path("/cg/..*")
+        path("/gamecg/..*")
+        path("/imageset/..*")
+        path("/anime/..*")
+        path("/galleries/..*")
+        path("/reader/..*")
     }
 }
