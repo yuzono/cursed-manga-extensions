@@ -79,7 +79,7 @@ internal fun Gallery.toSManga() = SManga.create().apply {
     author = groups?.joinToString { it.formatted } ?: artists?.joinToString { it.formatted }
     artist = artists?.joinToString { it.formatted }
     genre = tags?.joinToString { it.formatted }
-    thumbnail_url = files.first().let {
+    thumbnail_url = files.firstOrNull()?.let {
         HttpUrl.Builder().apply {
             scheme("https")
             host(IMAGE_LOOPBACK_HOST)
