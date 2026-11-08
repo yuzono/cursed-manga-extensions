@@ -106,8 +106,9 @@ abstract class Hitomi : KeiSource() {
         val ids = lastSearch?.takeIf { page > 1 && it.key == key }?.ids
             ?: hitomiSearch(query, filters, nozomiLang).also { lastSearch = SearchResults(key, it) }
 
+        val start = min((page - 1) * 25, ids.size)
         val end = min(page * 25, ids.size)
-        val entries = ids.asList().subList((page - 1) * 25, end)
+        val entries = ids.asList().subList(start, end)
             .toMangaList()
         return MangasPage(entries, end < ids.size)
     }
