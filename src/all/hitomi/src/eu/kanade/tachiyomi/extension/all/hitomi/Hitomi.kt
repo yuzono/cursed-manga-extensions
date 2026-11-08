@@ -96,7 +96,7 @@ abstract class Hitomi : KeiSource() {
         return MangasPage(entries, entries.size >= 24)
     }
 
-    private class SearchResults(val key: String, val ids: List<Int>)
+    private class SearchResults(val key: String, val ids: IntArray)
 
     @Volatile
     private var lastSearch: SearchResults? = null
@@ -107,7 +107,7 @@ abstract class Hitomi : KeiSource() {
             ?: hitomiSearch(query, filters, nozomiLang).also { lastSearch = SearchResults(key, it) }
 
         val end = min(page * 25, ids.size)
-        val entries = ids.subList((page - 1) * 25, end)
+        val entries = ids.asList().subList((page - 1) * 25, end)
             .toMangaList()
         return MangasPage(entries, end < ids.size)
     }
@@ -166,7 +166,7 @@ abstract class Hitomi : KeiSource() {
         query: String,
         filters: FilterList,
         language: String = "all",
-    ): List<Int> = coroutineScope {
+    ): IntArray = coroutineScope {
         var sortBy: Pair<String?, String> = Pair(null, "index")
         var random = false
 
@@ -279,10 +279,8 @@ abstract class Hitomi : KeiSource() {
             filterNegative(it.await())
         }
 
-        if (random) {
-            results.toList().shuffled()
-        } else {
-            results.toList()
+        results.toIntArray().apply {
+            if (random) shuffle()
         }
     }
 
