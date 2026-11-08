@@ -23,6 +23,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
 import okhttp3.CacheControl
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -518,9 +519,7 @@ abstract class Hitomi : KeiSource() {
         map { id ->
             async {
                 try {
-                    client.get("$ltnUrl/galleries/$id.js")
-                        .parseScriptAs<Gallery>()
-                        .toSManga()
+                    getGallery(id.toString()).toSManga()
                 } catch (e: HttpException) {
                     if (e.code == 404) {
                         return@async null
@@ -532,14 +531,20 @@ abstract class Hitomi : KeiSource() {
         }.awaitAll().filterNotNull()
     }
 
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host) return null
+        val id = url.pathSegments.last().galleryId().toIntOrNull() ?: return null
+
+        return getGallery(id.toString()).toSManga()
+    }
+
     override suspend fun fetchMangaUpdate(
         manga: SManga,
         chapters: List<SChapter>,
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val gallery = client.get("$ltnUrl/galleries/${manga.url.galleryId()}.js")
-            .parseScriptAs<Gallery>()
+        val gallery = getGallery(manga.url.galleryId())
 
         val chapter = SChapter.create().apply {
             name = "Chapter"
@@ -555,8 +560,7 @@ abstract class Hitomi : KeiSource() {
     }
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {
-        val gallery = client.get("$ltnUrl/galleries/${chapter.url.galleryId()}.js")
-            .parseScriptAs<Gallery>()
+        val gallery = getGallery(chapter.url.galleryId())
         val id = gallery.galleryurl.galleryId()
 
         return gallery.files.mapIndexed { idx, img ->
@@ -588,6 +592,8 @@ abstract class Hitomi : KeiSource() {
             .get()
             .build()
     }
+
+    private suspend fun getGallery(id: String): Gallery = client.get("$ltnUrl/galleries/$id.js").parseScriptAs()
 
     private fun String.galleryId() = substringAfterLast("-").substringBefore(".")
 
