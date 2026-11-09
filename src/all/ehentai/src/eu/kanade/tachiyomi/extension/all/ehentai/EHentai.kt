@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import keiyoushi.annotation.Source
+import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.asJsoup
@@ -162,7 +163,7 @@ abstract class EHentai :
         return fetchGallery("${segments[1]}/${segments[2]}")
     }
 
-    private suspend fun fetchGallery(idAndToken: String): SManga = client.get("$baseUrl/g/$idAndToken").toMangaDetails()
+    private suspend fun fetchGallery(idAndToken: String): SManga = client.get("$baseUrl/g/$idAndToken", Fetch.DOCUMENT).toMangaDetails()
 
     private suspend fun loadListing(listingUrl: String, page: Int, useFrom: Boolean = false): MangasPage {
         // Resume from the nearest page whose cursor is still cached, or from the first page if none is
@@ -193,7 +194,7 @@ abstract class EHentai :
             if (useFrom) url = addParam(url, "from", cursor)
             url = addParam(url, "next", cursor)
         }
-        return parseMangaPage(client.get(url), listingUrl, page, requestId)
+        return parseMangaPage(client.get(url, Fetch.DOCUMENT), listingUrl, page, requestId)
     }
 
     private fun languageTag(enforceLanguageFilter: Boolean = false): String = if (enforceLanguageFilter || getEnforceLanguagePref()) "language:$ehLang" else ""
@@ -249,7 +250,7 @@ abstract class EHentai :
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val updatedManga = if (fetchDetails) client.get("$baseUrl${manga.url}").toMangaDetails(manga.url) else manga
+        val updatedManga = if (fetchDetails) client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).toMangaDetails(manga.url) else manga
         val updatedChapters = if (fetchChapters) {
             listOf(
                 SChapter.create().apply {
@@ -356,7 +357,7 @@ abstract class EHentai :
         val pageUrls = mutableListOf<String>()
         var next: String? = "$baseUrl${chapter.url}"
         while (next != null) {
-            val doc = client.get(next).asJsoup()
+            val doc = client.get(next, Fetch.DOCUMENT).asJsoup()
             val hrefs = doc.select("#gdt a").map { it.attr("abs:href") }
             // Newer layout links every thumbnail to the multi-page viewer
             hrefs.firstOrNull { "/mpv/" in it }?.let { return getMpvPages(it) }
@@ -367,7 +368,7 @@ abstract class EHentai :
     }
 
     private suspend fun getMpvPages(mpvHref: String): List<Page> {
-        val scripts = client.get(mpvHref.substringBefore('#')).asJsoup()
+        val scripts = client.get(mpvHref.substringBefore('#'), Fetch.DOCUMENT).asJsoup()
             .select("script")
             .joinToString("\n") { it.data() }
         val gid = GID_REGEX.find(scripts)?.groupValues?.get(1)
@@ -383,7 +384,7 @@ abstract class EHentai :
         if (it.text() == ">") it.attr("abs:href") else null
     }
 
-    override suspend fun getImageUrl(page: Page): String = imageUrlParse(client.get(page.url), true)
+    override suspend fun getImageUrl(page: Page): String = imageUrlParse(client.get(page.url, Fetch.DOCUMENT), true)
 
     private fun imageUrlParse(response: Response, isGetBakImageUrl: Boolean): String {
         val doc = response.asJsoup()

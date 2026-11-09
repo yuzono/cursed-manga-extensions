@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import keiyoushi.annotation.Source
+import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
@@ -58,9 +59,9 @@ abstract class Hentai2Read :
         return rateLimit(permits = 2, period = 1.seconds) { it.host == host }
     }
 
-    override suspend fun getPopularManga(page: Int): MangasPage = client.get(rankingUrl(preferences.getString(PREF_POPULAR_PERIOD, "").orEmpty(), page)).asJsoup().toMangasPage()
+    override suspend fun getPopularManga(page: Int): MangasPage = client.get(rankingUrl(preferences.getString(PREF_POPULAR_PERIOD, "").orEmpty(), page), Fetch.DOCUMENT).asJsoup().toMangasPage()
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = client.get(listingUrl("/browse", page)).asJsoup().toMangasPage()
+    override suspend fun getLatestUpdates(page: Int): MangasPage = client.get(listingUrl("/browse", page), Fetch.DOCUMENT).asJsoup().toMangasPage()
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         // Callers can pass an empty list instead of the source's filters.
@@ -89,7 +90,7 @@ abstract class Hentai2Read :
             }.build().toString()
         }
 
-        return client.get(url).asJsoup().toMangasPage()
+        return client.get(url, Fetch.DOCUMENT).asJsoup().toMangasPage()
     }
 
     // Unlike the other listings, rankings page with ?page=N.
@@ -111,7 +112,7 @@ abstract class Hentai2Read :
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
-        val document = client.get(url.newBuilder().scheme("https").build()).asJsoup()
+        val document = client.get(url.newBuilder().scheme("https").build(), Fetch.DOCUMENT).asJsoup()
         val canonical = document.selectFirst("link[rel=canonical]")?.absUrl("href")
         if (document.selectFirst(TITLE_SELECTOR) == null) {
             // A reader page's canonical link is its book page.
@@ -137,7 +138,7 @@ abstract class Hentai2Read :
                 listingUrl("/" + segments.dropLastWhile { PAGE_SEGMENT_REGEX.matches(it) }.joinToString("/"), page)
             else -> return MangasPage(listOfNotNull(getMangaByUrl(url)), false)
         }
-        return client.get(listing).asJsoup().toMangasPage()
+        return client.get(listing, Fetch.DOCUMENT).asJsoup().toMangasPage()
     }
 
     private fun listingUrl(path: String, page: Int) = if (page > 1) "$baseUrl$path/page-$page" else "$baseUrl$path"
@@ -178,7 +179,7 @@ abstract class Hentai2Read :
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val document = client.get("$baseUrl${manga.url}").asJsoup()
+        val document = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
         val title = document.selectFirst(TITLE_SELECTOR)?.text()
             ?: throw Exception("Manga page not found. Migrate or re-add this entry.")
 
@@ -241,7 +242,7 @@ abstract class Hentai2Read :
         return try {
             val url = "$baseUrl/search".toHttpUrl().newBuilder().addQueryParameter("q", title).build()
             // An error page (e.g. a Cloudflare 403) has no page data, so it yields null instead of throwing.
-            client.get(url, ensureSuccess = false).asJsoup().parsePageDataOrNull<ListingDto>()?.books.orEmpty()
+            client.get(url, Fetch.DOCUMENT, ensureSuccess = false).asJsoup().parsePageDataOrNull<ListingDto>()?.books.orEmpty()
                 .firstOrNull { it.id == id }?.pageCount
         } catch (_: IOException) {
             null // a failed lookup shouldn't break the details refresh
@@ -306,7 +307,7 @@ abstract class Hentai2Read :
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         // Pre-redesign chapter URLs (/slug/N/) don't redirect to the new reader.
         if (!chapter.url.startsWith("/reader/")) throw Exception("Outdated chapter link. Refresh the chapter list.")
-        val document = client.get("$baseUrl${chapter.url}").asJsoup()
+        val document = client.get("$baseUrl${chapter.url}", Fetch.DOCUMENT).asJsoup()
         return document.parsePageData<ReaderDto>().toPages()
     }
 
@@ -314,15 +315,15 @@ abstract class Hentai2Read :
         (TAG_TYPES.map { type -> async { fetchTags(type) } } + async { fetchTopArtists() }).awaitAll().flatten()
     }.toJsonElement()
 
-    private suspend fun fetchTopArtists(): List<TagDto> = client.get("$baseUrl/tags/artist").asJsoup()
+    private suspend fun fetchTopArtists(): List<TagDto> = client.get("$baseUrl/tags/artist", Fetch.DOCUMENT).asJsoup()
         .parsePageData<TagPageDto>().tags
         .filter { it.name != "Unknown" }
 
     private suspend fun fetchTags(type: String): List<TagDto> {
-        val first = client.get("$baseUrl/tags/$type").asJsoup().parsePageData<TagPageDto>()
+        val first = client.get("$baseUrl/tags/$type", Fetch.DOCUMENT).asJsoup().parsePageData<TagPageDto>()
         val rest = coroutineScope {
             (2..minOf(first.lastPage, MAX_TAG_PAGES)).map { page ->
-                async { client.get("$baseUrl/tags/$type/page-$page").asJsoup().parsePageData<TagPageDto>().tags }
+                async { client.get("$baseUrl/tags/$type/page-$page", Fetch.DOCUMENT).asJsoup().parsePageData<TagPageDto>().tags }
             }.awaitAll()
         }.flatten()
         return first.tags + rest

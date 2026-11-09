@@ -6,7 +6,7 @@ plugins {
 
 keiyoushi {
     name = "Pururin"
-    versionCode = 12
+    versionCode = 1
     contentWarning = ContentWarning.NSFW
     libVersion = "1.6"
 

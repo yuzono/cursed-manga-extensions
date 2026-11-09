@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
+import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.network.post
 import keiyoushi.source.KeiSource
@@ -46,9 +47,9 @@ class Pururin(
         }
     }
 
-    override suspend fun getPopularManga(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?sort=most-popular&page=$page").parseMangaList()
+    override suspend fun getPopularManga(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?sort=most-popular&page=$page", Fetch.DOCUMENT).parseMangaList()
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?page=$page").parseMangaList()
+    override suspend fun getLatestUpdates(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?page=$page", Fetch.DOCUMENT).parseMangaList()
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         val includeTags = mutableListOf<Pair<String, String>>()
@@ -89,7 +90,7 @@ class Pururin(
                         addQueryParameter("last_page", pagesMax.toString())
                         if (page > 1) addQueryParameter("page", page.toString())
                     }.build()
-                    return client.get(url).parseMangaList()
+                    return client.get(url, Fetch.DOCUMENT).parseMangaList()
                 }
             }
         }
@@ -105,14 +106,14 @@ class Pururin(
             if (page > 1) addQueryParameter("page", page.toString())
         }.build()
 
-        return client.get(url).parseMangaList()
+        return client.get(url, Fetch.DOCUMENT).parseMangaList()
     }
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
         if (url.pathSegments.firstOrNull() != "gallery" || url.pathSegments.getOrNull(1)?.toIntOrNull() == null) return null
 
-        val response = client.get(url)
+        val response = client.get(url, Fetch.DOCUMENT)
         // Stored like browse links, so a pasted link doesn't add a second library entry
         val canonicalUrl = response.request.url.toString().removeSuffix("/")
         return parseDetails(response.asJsoup()).apply { setUrlWithoutDomain(canonicalUrl) }
@@ -125,7 +126,7 @@ class Pururin(
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val document = client.get("$baseUrl${manga.url}").asJsoup()
+        val document = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
         val details = parseDetails(document).apply { url = manga.url }
 
         val parsed = document.select(".table-collection tbody tr a")
@@ -152,7 +153,7 @@ class Pururin(
         return SMangaUpdate(details, chapterList)
     }
 
-    override suspend fun getPageList(chapter: SChapter): List<Page> = client.get("$baseUrl${chapter.url}").asJsoup()
+    override suspend fun getPageList(chapter: SChapter): List<Page> = client.get("$baseUrl${chapter.url}", Fetch.DOCUMENT).asJsoup()
         .select(".gallery-preview a img")
         .mapIndexed { i, img ->
             val imageUrl = img.absUrl("data-src").ifEmpty { img.absUrl("src") }
@@ -232,7 +233,7 @@ class Pururin(
             .add("text", tag)
             .build()
 
-        val tags = client.post("$baseUrl/api/get/tags/search", requestBody).parseAs<List<Tag>>()
+        val tags = client.post("$baseUrl/api/get/tags/search", Fetch.XHR, requestBody).parseAs<List<Tag>>()
         return findTagByNameSubstring(tags, type)
     }
 }

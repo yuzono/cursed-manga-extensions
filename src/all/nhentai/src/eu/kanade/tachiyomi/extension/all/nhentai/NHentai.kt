@@ -16,9 +16,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
-import keiyoushi.lib.randomua.addRandomUAPreference
-import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.network.DEFAULT_CACHE_CONTROL
+import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
@@ -28,7 +27,6 @@ import keiyoushi.utils.parseAs
 import kotlinx.serialization.json.JsonElement
 import okhttp3.Cache
 import okhttp3.CacheControl
-import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
@@ -105,16 +103,12 @@ class NHentai(
             .rateLimit(permits, period.seconds) { it.host == baseUrlHost }
     }
 
-    override fun Headers.Builder.configureHeaders(): Headers.Builder = setRandomUserAgent(
-        filterInclude = listOf("chrome"),
-    )
-
     override suspend fun getPopularManga(page: Int): MangasPage {
         val url = "$apiUrl/search".toHttpUrl().newBuilder()
             .addQueryParameter("query", if (nhLang.isEmpty()) "\"\"" else "language:$nhLang")
             .addQueryParameter("sort", "popular")
             .addQueryParameter("page", page.toString())
-        return client.get(url.build()).toMangasPage()
+        return client.get(url.build(), Fetch.XHR).toMangasPage()
     }
 
     override suspend fun getLatestUpdates(page: Int): MangasPage {
@@ -125,7 +119,7 @@ class NHentai(
                 .addQueryParameter("query", "language:$nhLang")
         }
         url.addQueryParameter("page", page.toString())
-        return client.get(url.build()).toMangasPage()
+        return client.get(url.build(), Fetch.XHR).toMangasPage()
     }
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
@@ -159,7 +153,7 @@ class NHentai(
                     filterList.firstInstanceOrNull<SortFilter>()?.let { addQueryParameter("sort", it.toUriPart()) }
                 }
         }
-        return client.get(url.build()).toMangasPage()
+        return client.get(url.build(), Fetch.XHR).toMangasPage()
     }
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
@@ -176,14 +170,12 @@ class NHentai(
     ): SMangaUpdate {
         val id = manga.url.removeSurrounding("/g/", "/")
         val cacheControl = if (fetchDetails) DEFAULT_CACHE_CONTROL else galleryCacheControl
-        val data = client.get("$apiUrl/galleries/$id", cacheControl = cacheControl).parseAs<Hentai>()
+        val data = client.get("$apiUrl/galleries/$id", Fetch.XHR, cacheControl = cacheControl).parseAs<Hentai>()
         return SMangaUpdate(
             manga = if (fetchDetails) data.toSManga(getConfig().thumbServers.random(), displayFullTitle) else manga,
             chapters = listOf(data.toSChapter()),
         )
     }
-
-    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val data = getGallery(chapter.url.removeSurrounding("/g/", "/"))
@@ -252,8 +244,6 @@ class NHentai(
             setDefaultValue("")
         }.let(screen::addPreference)
 
-        screen.addRandomUAPreference()
-
         ListPreference(screen.context).apply {
             key = RATE_LIMIT_PREF
             title = "Network Rate Limit"
@@ -271,7 +261,7 @@ class NHentai(
     private suspend fun getConfig(): NHConfig {
         nhConfig.get()?.let { return it }
         return try {
-            client.get("$apiUrl/config").parseAs<NHConfig>().also {
+            client.get("$apiUrl/config", Fetch.XHR).parseAs<NHConfig>().also {
                 require(it.imageServers.isNotEmpty() && it.thumbServers.isNotEmpty())
                 nhConfig.set(it)
             }
@@ -295,7 +285,7 @@ class NHentai(
         .toSManga(getConfig().thumbServers.random(), displayFullTitle)
         .apply { initialized = true }
 
-    private suspend fun getGallery(id: String): Hentai = client.get("$apiUrl/galleries/$id").parseAs()
+    private suspend fun getGallery(id: String): Hentai = client.get("$apiUrl/galleries/$id", Fetch.XHR).parseAs()
 
     private suspend fun Response.toMangasPage(): MangasPage {
         val currentPage = request.url.queryParameter("page")?.toIntOrNull() ?: 1

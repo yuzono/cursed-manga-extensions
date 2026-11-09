@@ -9,6 +9,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
+import keiyoushi.network.Fetch
+import keiyoushi.network.fetch
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.parseAs
@@ -143,9 +145,9 @@ abstract class Hitomi : KeiSource() {
         repeat(tries) { attempt ->
             try {
                 val response = if (rangeHeaders == null) {
-                    client.get(url)
+                    client.get(url, Fetch.XHR)
                 } else {
-                    client.get(url, rangeHeaders, CacheControl.FORCE_NETWORK)
+                    client.get(url, rangeHeaders, Fetch.XHR, CacheControl.FORCE_NETWORK)
                 }
 
                 return response.use { it.body.bytes() }
@@ -455,7 +457,7 @@ abstract class Hitomi : KeiSource() {
 
     private suspend fun galleriesIndexVersion(): String = indexVersionMutex.withLock {
         indexVersion?.takeIf { indexVersionRetrieval + 60000 > System.currentTimeMillis() }
-            ?: client.get("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}")
+            ?: client.get("$ltnUrl/galleriesindex/version?_=${System.currentTimeMillis()}", Fetch.XHR)
                 .use { it.body.string() }
                 .also {
                     indexVersion = it
@@ -588,19 +590,13 @@ abstract class Hitomi : KeiSource() {
         }
     }
 
-    override fun imageRequest(page: Page): Request {
-        val imageHeaders = headersBuilder()
-            .set("Accept", "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-            .set("Referer", page.url)
-            .build()
+    override fun getImageRequest(page: Page): Request = Request.Builder()
+        .url(page.imageUrl!!)
+        .headers(headers)
+        .fetch(Fetch.IMAGE.from(page.url))
+        .build()
 
-        return Request.Builder()
-            .url(page.imageUrl!!)
-            .headers(imageHeaders)
-            .build()
-    }
-
-    private suspend fun getGallery(id: String): Gallery = client.get("$ltnUrl/galleries/$id.js").parseScriptAs()
+    private suspend fun getGallery(id: String): Gallery = client.get("$ltnUrl/galleries/$id.js", Fetch.SCRIPT).parseScriptAs()
 
     private fun String.galleryId() = substringAfterLast("-").substringBefore(".")
 
@@ -614,7 +610,7 @@ abstract class Hitomi : KeiSource() {
 
     private suspend fun refreshScript() = mutex.withLock {
         if (scriptLastRetrieval == null || (scriptLastRetrieval!! + 60000) < System.currentTimeMillis()) {
-            val ggScript = client.get("$ltnUrl/gg.js?_=${System.currentTimeMillis()}")
+            val ggScript = client.get("$ltnUrl/gg.js?_=${System.currentTimeMillis()}", Fetch.SCRIPT)
                 .use { it.body.string() }
 
             subdomainOffsetDefault = SUBDOMAIN_DEFAULT_REGEX.find(ggScript)!!.groupValues[1].toInt()
