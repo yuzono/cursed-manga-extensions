@@ -469,6 +469,7 @@ abstract class EHentai :
             .flatMap { it.second }
             .joinToString("x")
 
+        // Blank values are dropped: addCookie also writes these into the WebView cookie store, where they would replace a WebView login
         listOf(
             "uconfig" to "prn_n-xl_$excludedLanguages",
             // Bypass "Offensive For Everyone" content warning
@@ -476,7 +477,7 @@ abstract class EHentai :
             "ipb_member_id" to memberId,
             "ipb_pass_hash" to passHash,
             "igneous" to igneous,
-        )
+        ).filter { it.second.isNotEmpty() }
     }
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = cookieJar(CookieJar.NO_COOKIES)
