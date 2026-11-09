@@ -71,8 +71,8 @@ class BookPageDto(private val props: Props) {
 
     @Serializable
     class Chapter(
-        val number: String,
-        val title: String,
+        val number: String? = null,
+        val title: String? = null,
         val url: String,
         val date: String? = null,
     )

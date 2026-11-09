@@ -271,10 +271,11 @@ abstract class Hentai2Read :
         val jsonChapters = document.parsePageDataOrNull<BookPageDto>()?.chapters.orEmpty()
         if (jsonChapters.isNotEmpty()) {
             return jsonChapters.map { chapter ->
+                val number = chapter.number?.takeIf { it.isNotEmpty() }
                 SChapter.create().apply {
                     setUrlWithoutDomain(chapter.url)
-                    name = if (chapter.number.isNotEmpty()) "Ch. ${chapter.number} - ${chapter.title}" else chapter.title
-                    chapter_number = chapter.number.toFloatOrNull() ?: -1f
+                    name = listOfNotNull(number?.let { "Ch. $it" }, chapter.title).joinToString(" - ")
+                    chapter_number = number?.toFloatOrNull() ?: -1f
                     date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
                 }
             }
