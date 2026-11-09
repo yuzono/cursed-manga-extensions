@@ -278,7 +278,7 @@ abstract class Hentai2Read :
         if (jsonChapters.isNotEmpty()) {
             return jsonChapters.map { chapter ->
                 val number = chapter.number?.takeIf { it.isNotEmpty() }
-                val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ")
+                val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ").ifEmpty { "Chapter" }
                 SChapter.create().apply {
                     setUrlWithoutDomain(chapter.url)
                     name = if (chapter.isMembers) "🔒 $label" else label
