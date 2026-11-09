@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.en.hentai2read
 
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -64,6 +65,7 @@ class BookPageDto(private val props: Props) {
     class Props(
         val book: Book,
         val chapters: List<Chapter> = emptyList(),
+        val related: List<Related> = emptyList(),
     )
 
     @Serializable
@@ -78,8 +80,22 @@ class BookPageDto(private val props: Props) {
         val isMembers: Boolean = false,
     )
 
+    @Serializable
+    class Related(
+        private val title: String,
+        private val url: String,
+        private val cover: String? = null,
+    ) {
+        fun toSManga() = SManga.create().apply {
+            title = this@Related.title
+            url = this@Related.url
+            thumbnail_url = cover
+        }
+    }
+
     val id get() = props.book.id
     val chapters get() = props.chapters
+    val related get() = props.related
 }
 
 @Serializable
@@ -91,8 +107,12 @@ class ReaderDto(private val props: Props) {
         val avif: List<String?> = emptyList(),
     )
 
-    // `avif` holds the same pages by index, so it fills any page missing from `images`.
-    fun toPages(): List<Page> = (0 until maxOf(props.images.size, props.avif.size))
-        .mapNotNull { props.images.getOrNull(it) ?: props.avif.getOrNull(it) }
+    // `avif` holds the same pages by index, so either list fills a page missing from the other
+    fun toPages(preferAvif: Boolean): List<Page> = (0 until maxOf(props.images.size, props.avif.size))
+        .mapNotNull {
+            val webp = props.images.getOrNull(it)
+            val avif = props.avif.getOrNull(it)
+            if (preferAvif) avif ?: webp else webp ?: avif
+        }
         .mapIndexed { index, url -> Page(index, imageUrl = if (url.startsWith("//")) "https:$url" else url) }
 }

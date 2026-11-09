@@ -304,11 +304,16 @@ abstract class Hentai2Read :
         }
     }
 
+    override val supportsRelatedMangas = true
+
+    override suspend fun fetchRelatedMangaList(manga: SManga): List<SManga> = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
+        .parsePageData<BookPageDto>().related.map { it.toSManga() }
+
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         // Pre-redesign chapter URLs (/slug/N/) don't redirect to the new reader.
         if (!chapter.url.startsWith("/reader/")) throw Exception("Outdated chapter link. Refresh the chapter list.")
         val document = client.get("$baseUrl${chapter.url}", Fetch.DOCUMENT).asJsoup()
-        return document.parsePageData<ReaderDto>().toPages()
+        return document.parsePageData<ReaderDto>().toPages(preferAvif = hasNewDecoder)
     }
 
     override suspend fun fetchFilterData(): JsonElement = coroutineScope {
@@ -344,6 +349,9 @@ abstract class Hentai2Read :
             setDefaultValue("")
         }.also(screen::addPreference)
     }
+
+    // Animated avif plays with Mihon's new decoder (v0.21.0+), older forks only show a still frame
+    private val hasNewDecoder by lazy { runCatching { Class.forName("ca.mpreg.imagedecoder.ImageDecoder") }.isSuccess }
 
     private inline fun <reified T> Document.parsePageData(): T {
         val script = selectFirst("script[data-page=app]")?.data()
