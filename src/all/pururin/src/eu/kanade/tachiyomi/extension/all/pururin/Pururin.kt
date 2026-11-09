@@ -268,6 +268,9 @@ class Pururin(
         .tag(LegacyMarkup::class.java, LegacyMarkup)
         .build()
 
+    // Komikku's default sends it without browser headers; the old markup doesn't change the chapter list
+    fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+
     private object LegacyMarkup
 
     private fun Document.toLegacyMarkup(galleryPath: String) {
