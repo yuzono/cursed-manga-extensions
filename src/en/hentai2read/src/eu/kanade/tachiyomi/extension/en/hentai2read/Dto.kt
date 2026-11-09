@@ -75,6 +75,7 @@ class BookPageDto(private val props: Props) {
         val title: String? = null,
         val url: String,
         val date: String? = null,
+        val isMembers: Boolean = false,
     )
 
     val id get() = props.book.id
@@ -86,7 +87,7 @@ class ReaderDto(private val props: Props) {
 
     @Serializable
     class Props(
-        val images: List<String?>,
+        val images: List<String?> = emptyList(),
         val avif: List<String?> = emptyList(),
     )
 

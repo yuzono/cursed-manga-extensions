@@ -274,9 +274,10 @@ abstract class Hentai2Read :
         if (jsonChapters.isNotEmpty()) {
             return jsonChapters.map { chapter ->
                 val number = chapter.number?.takeIf { it.isNotEmpty() }
+                val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ")
                 SChapter.create().apply {
                     setUrlWithoutDomain(chapter.url)
-                    name = listOfNotNull(number?.let { "Ch. $it" }, chapter.title).joinToString(" - ")
+                    name = if (chapter.isMembers) "🔒 $label" else label
                     chapter_number = number?.toFloatOrNull() ?: -1f
                     date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
                 }
@@ -348,7 +349,7 @@ abstract class Hentai2Read :
     private inline fun <reified T> Document.parsePageDataOrNull(): T? = runCatching { parsePageData<T>() }.getOrNull()
 
     companion object {
-        private const val MAX_TAG_PAGES = 20
+        private const val MAX_TAG_PAGES = 5
         private const val MEMO_PAGE_COUNT = "pageCount"
 
         private const val PREF_POPULAR_PERIOD = "popular_period"
