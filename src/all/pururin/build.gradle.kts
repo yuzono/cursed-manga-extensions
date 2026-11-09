@@ -6,9 +6,9 @@ plugins {
 
 keiyoushi {
     name = "Pururin"
-    versionCode = 11
+    versionCode = 12
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.4"
+    libVersion = "1.6"
 
     listOf("all", "en", "ja").forEach { sourceLang ->
         source {

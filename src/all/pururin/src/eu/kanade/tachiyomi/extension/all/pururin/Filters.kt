@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.extension.all.pururin
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 
-fun getFilters(): FilterList = FilterList(
+internal fun getFilters(): FilterList = FilterList(
     SelectFilter("Sort by", getSortsList),
     TypeFilter("Types"),
     Filter.Separator(),
@@ -23,12 +23,13 @@ fun getFilters(): FilterList = FilterList(
     Filter.Header("Filter by pages, for example: (>20)"),
     PageFilter("Pages"),
 )
+
 internal class TypeFilter(name: String) :
     Filter.Group<CheckBoxFilter>(
         name,
         listOf(
             Pair("Artbook", "17783"),
-            Pair("Artist CG", "13004"),
+            Pair("Artist CG", "13006"),
             Pair("Doujinshi", "13003"),
             Pair("Game CG", "13008"),
             Pair("Manga", "13004"),
@@ -45,9 +46,10 @@ internal open class TextFilter(name: String, val type: String) : Filter.Text(nam
 internal open class SelectFilter(name: String, val vals: List<Pair<String, String>>, state: Int = 0) : Filter.Select<String>(name, vals.map { it.first }.toTypedArray(), state) {
     fun getValue() = vals[state].second
 }
+
 private val getSortsList: List<Pair<String, String>> = listOf(
-    Pair("Newest", "newest"),
     Pair("Most Popular", "most-popular"),
+    Pair("Newest", "newest"),
     Pair("Highest Rated", "highest-rated"),
     Pair("Most Viewed", "most-viewed"),
     Pair("Title", "title"),
