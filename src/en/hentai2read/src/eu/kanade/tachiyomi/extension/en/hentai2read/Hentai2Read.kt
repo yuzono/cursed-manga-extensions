@@ -126,7 +126,7 @@ abstract class Hentai2Read :
 
         val segments = url.pathSegments.filter { it.isNotEmpty() }
         val listing = when {
-            segments.firstOrNull() == "search" -> url.newBuilder().setQueryParameter("page", page.toString()).build().toString()
+            segments.firstOrNull() == "search" -> url.newBuilder().scheme("https").setQueryParameter("page", page.toString()).build().toString()
             segments.firstOrNull() == "ranking" -> rankingUrl(url.queryParameter("period").orEmpty(), page)
             // Keep the link's other segments (/browse/trending, a tag's /doujinshi/completed); its /page-N gives way to the requested page.
             segments.firstOrNull() == "browse" || (segments.size >= 2 && segments[0] in LISTING_TYPES) ->
