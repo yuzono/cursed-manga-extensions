@@ -59,24 +59,26 @@ abstract class Hentai2Read :
     override suspend fun getLatestUpdates(page: Int): MangasPage = client.get(listingUrl("/browse", page)).asJsoup().toMangasPage()
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
-        val tags = filters.filterIsInstance<TagGroup>().flatMap { it.state }
-        val artists = filters.filterIsInstance<ArtistGroup>().flatMap { it.state }.filter { it.state }
+        // Callers can pass an empty list instead of the source's filters.
+        val filterList = filters.ifEmpty { getFilterList() }
+        val tags = filterList.filterIsInstance<TagGroup>().flatMap { it.state }
+        val artists = filterList.filterIsInstance<ArtistGroup>().flatMap { it.state }.filter { it.state }
         val includedTags = tags.filter { it.isIncluded() }
         val included = includedTags.map { it.id } + artists.map { it.id }
         val excluded = tags.filter { it.isExcluded() }.map { it.id }
         val selectedPages = includedTags.map { it.url } + artists.map { it.url }
-        val ranking = filters.firstInstance<RankingFilter>().period
+        val ranking = filterList.firstInstance<RankingFilter>().period
 
         // Search text always searches. Without it, a ranking or a single included tag/artist opens that page.
         val url = when {
             query.isBlank() && ranking != null -> rankingUrl(ranking, page)
-            query.isBlank() && excluded.isEmpty() && selectedPages.size == 1 -> tagPageUrl(selectedPages.single(), filters, page)
+            query.isBlank() && excluded.isEmpty() && selectedPages.size == 1 -> tagPageUrl(selectedPages.single(), filterList, page)
             else -> "$baseUrl/search".toHttpUrl().newBuilder().apply {
                 if (query.isNotBlank()) addQueryParameter("q", query)
-                filters.firstInstance<TypeFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("type", it) }
-                filters.firstInstance<StatusFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("status", it) }
-                filters.firstInstance<SortFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("sort", it) }
-                if (filters.firstInstance<MatchAnyFilter>().state) addQueryParameter("match", "any")
+                filterList.firstInstance<TypeFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("type", it) }
+                filterList.firstInstance<StatusFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("status", it) }
+                filterList.firstInstance<SortFilter>().value.takeIf { it.isNotEmpty() }?.let { addQueryParameter("sort", it) }
+                if (filterList.firstInstance<MatchAnyFilter>().state) addQueryParameter("match", "any")
                 if (included.isNotEmpty()) addQueryParameter("with", included.joinToString(","))
                 if (excluded.isNotEmpty()) addQueryParameter("without", excluded.joinToString(","))
                 if (page > 1) addQueryParameter("page", page.toString())
@@ -105,7 +107,7 @@ abstract class Hentai2Read :
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
-        val document = client.get(url).asJsoup()
+        val document = client.get(url.newBuilder().scheme("https").build()).asJsoup()
         val canonical = document.selectFirst("link[rel=canonical]")?.absUrl("href")
         if (document.selectFirst(TITLE_SELECTOR) == null) {
             // A reader page's canonical link is its book page.
