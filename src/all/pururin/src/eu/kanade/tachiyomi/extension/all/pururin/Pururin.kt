@@ -57,7 +57,10 @@ class Pururin(
 
         val contentType = response.body.contentType()
         val document = response.asJsoup().apply { toLegacyMarkup(response.request.url.encodedPath) }
-        response.newBuilder().body(document.outerHtml().toResponseBody(contentType)).build()
+        response.newBuilder()
+            .removeHeader("Content-Length")
+            .body(document.outerHtml().toResponseBody(contentType))
+            .build()
     }
 
     override suspend fun getPopularManga(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?sort=most-popular&page=$page", Fetch.DOCUMENT).parseMangaList()
