@@ -353,7 +353,7 @@ abstract class Hentai2Read :
     private inline fun <reified T> Document.parsePageDataOrNull(): T? = runCatching { parsePageData<T>() }.getOrNull()
 
     companion object {
-        private const val MAX_TAG_PAGES = 5
+        private const val MAX_TAG_PAGES = 10
         private const val MEMO_PAGE_COUNT = "pageCount"
 
         private const val PREF_POPULAR_PERIOD = "popular_period"
