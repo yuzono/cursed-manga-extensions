@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.pururin
 
+import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -8,6 +9,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
 import keiyoushi.network.Fetch
+import keiyoushi.network.fetch
 import keiyoushi.network.get
 import keiyoushi.network.post
 import keiyoushi.source.KeiSource
@@ -20,14 +22,21 @@ import kotlinx.serialization.json.JsonElement
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
-// Abstract so the generated sources don't keep this class name: Komikku's delegated Pururin is broken
-// (its parser crashes on the current site), so it isn't delegated until that is fixed there
+// Concrete so the generated sources keep this class name, which Komikku/SY match their delegated Pururin on
 @Source
-abstract class Pururin : KeiSource() {
+class Pururin(
+    override val name: String,
+    override val lang: String,
+    override val baseUrl: String,
+    override val id: Long,
+) : KeiSource() {
     private val searchLang: Pair<String, String>?
         get() = when (lang) {
             "en" -> Pair("13010", "english")
@@ -41,6 +50,15 @@ abstract class Pururin : KeiSource() {
             "ja" -> "/tags/language/13011/japanese"
             else -> ""
         }
+
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = addInterceptor { chain ->
+        val response = chain.proceed(chain.request())
+        if (chain.request().tag(LegacyMarkup::class.java) == null || !response.isSuccessful) return@addInterceptor response
+
+        val contentType = response.body.contentType()
+        val document = response.asJsoup().apply { toLegacyMarkup(response.request.url.encodedPath) }
+        response.newBuilder().body(document.outerHtml().toResponseBody(contentType)).build()
+    }
 
     override suspend fun getPopularManga(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?sort=most-popular&page=$page", Fetch.DOCUMENT).parseMangaList()
 
@@ -242,7 +260,25 @@ abstract class Pururin : KeiSource() {
         return findTagByNameSubstring(tags, type)
     }
 
-    // Used by Komikku's delegated Pururin, which requests the gallery page itself
+    // Used by Komikku's delegated Pururin, which requests the gallery page itself and parses its details
+    // with the site's old markup
+
+    fun mangaDetailsRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers).newBuilder()
+        .fetch(Fetch.DOCUMENT)
+        .tag(LegacyMarkup::class.java, LegacyMarkup)
+        .build()
+
+    private object LegacyMarkup
+
+    private fun Document.toLegacyMarkup(galleryPath: String) {
+        select(".box-gallery .table-info").addClass("table-gallery-info")
+        selectFirst(".box-gallery .cover-wrapper")?.let { cover ->
+            // Komikku adds the scheme itself
+            cover.appendElement("v-lazy-image").attr("src", cover.select("img").attr("abs:src").substringAfter(':'))
+        }
+        // Komikku reads the gallery id and slug from the link around the last [itemprop=name]
+        body().appendElement("a").attr("href", galleryPath).appendElement("span").attr("itemprop", "name")
+    }
 
     fun chapterListParse(response: Response): List<SChapter> {
         val galleryUrl = response.request.url.encodedPath
