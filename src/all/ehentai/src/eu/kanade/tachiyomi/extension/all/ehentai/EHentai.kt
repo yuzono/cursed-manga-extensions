@@ -19,7 +19,6 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import keiyoushi.annotation.Source
-import keiyoushi.network.addCookie
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.asJsoup
@@ -103,19 +102,13 @@ abstract class EHentai :
 
     private fun isLangNatural(): Boolean = lang !in listOf("none", "other")
 
-    // Popular
-
     override suspend fun getPopularManga(page: Int): MangasPage = if (isLangNatural()) {
         loadListing("$baseUrl/?f_search=${languageTag()}&f_srdd=5&f_sr=on", page)
     } else {
         getLatestUpdates(page)
     }
 
-    // Latest
-
     override suspend fun getLatestUpdates(page: Int): MangasPage = loadListing(baseUrl, page)
-
-    // Search
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         if (query.startsWith(PREFIX_ID_SEARCH)) {
@@ -249,8 +242,6 @@ abstract class EHentai :
         return ListingResult(MangasPage(mangas, hasNextPage), nextId)
     }
 
-    // Details and chapters
-
     // A gallery is a single chapter built from the manga url, so there is no request behind the chapter list
     override suspend fun fetchMangaUpdate(
         manga: SManga,
@@ -361,8 +352,6 @@ abstract class EHentai :
         }
     }
 
-    // Pages
-
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val pageUrls = mutableListOf<String>()
         var next: String? = "$baseUrl${chapter.url}"
@@ -425,8 +414,6 @@ abstract class EHentai :
         return "$imgUrl#$bakUrl"
     }
 
-    // Filters
-
     override fun getFilterList(data: JsonElement?) = FilterList(
         EnforceLanguageFilter(getEnforceLanguagePref()),
         Favorites(),
@@ -440,8 +427,6 @@ abstract class EHentai :
         TextFilter("Male Tags", "male"),
         AdvancedGroup(),
     )
-
-    // Utilities
 
     private val languageMappings = listOf(
         Pair("japanese", listOf("0", "1024", "2048")),
@@ -463,13 +448,12 @@ abstract class EHentai :
         Pair("other", listOf("255", "1279", "2303")),
     )
 
-    private val requestCookies by lazy {
+    private val cookieHeader by lazy {
         // "prn_n" hides the "popular right now" pane we can't parse; "xl_" excludes every language except ours
         val excludedLanguages = languageMappings.filter { it.first != ehLang }
             .flatMap { it.second }
             .joinToString("x")
 
-        // Blank values are dropped: addCookie also writes these into the WebView cookie store, where they would replace a WebView login
         listOf(
             "uconfig" to "prn_n-xl_$excludedLanguages",
             // Bypass "Offensive For Everyone" content warning
@@ -478,11 +462,21 @@ abstract class EHentai :
             "ipb_pass_hash" to passHash,
             "igneous" to igneous,
         ).filter { it.second.isNotEmpty() }
+            .joinToString("; ") { "${it.first}=${it.second}" }
     }
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = cookieJar(CookieJar.NO_COOKIES)
         .addInterceptor { chain -> proceedWithImageFallback(chain) }
-        .addCookie { requestCookies }
+        .addInterceptor { chain -> proceedWithSiteCookies(chain) }
+
+    // A plain header rather than addCookie, which would also write these into the WebView cookie store and
+    // replace a newer WebView login, and the user's own uconfig there, with this source's values
+    private fun proceedWithSiteCookies(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val host = baseUrl.toHttpUrl().host
+        if (request.url.host != host && !request.url.host.endsWith(".$host")) return chain.proceed(request)
+        return chain.proceed(request.newBuilder().header("Cookie", cookieHeader).build())
+    }
 
     // Image urls carry the backup page url as a fragment: if the image fails to load, resolve a fresh one from it
     private fun proceedWithImageFallback(chain: Interceptor.Chain): Response {
@@ -516,12 +510,12 @@ abstract class EHentai :
     private fun Response.hasValidImageHeader(): Boolean {
         val header = peekBody(IMAGE_HEADER_SIZE).bytes()
         return IMAGE_SIGNATURES.any { header.startsWith(it) } ||
-            (header.startsWith(RIFF_SIGNATURE) && header.startsWith(WEBP_SIGNATURE, 8))
+            (header.startsWith(RIFF_SIGNATURE) && header.startsWith(WEBP_SIGNATURE, 8)) ||
+            header.startsWith(FTYP_SIGNATURE, 4)
     }
 
     private fun ByteArray.startsWith(signature: ByteArray, offset: Int = 0): Boolean = size >= offset + signature.size && signature.indices.all { this[offset + it] == signature[it] }
 
-    @Suppress("SameParameterValue")
     private fun addParam(url: String, param: String, value: String) = Uri.parse(url)
         .buildUpon()
         .appendQueryParameter(param, value)
@@ -663,9 +657,15 @@ abstract class EHentai :
             byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
             "GIF87a".toByteArray(),
             "GIF89a".toByteArray(),
+            // JPEG XL codestream and container
+            byteArrayOf(0xFF.toByte(), 0x0A),
+            byteArrayOf(0, 0, 0, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87.toByte(), 0x0A),
         )
         private val RIFF_SIGNATURE = "RIFF".toByteArray()
         private val WEBP_SIGNATURE = "WEBP".toByteArray()
+
+        // ISO-BMFF box type, as in AVIF/HEIF
+        private val FTYP_SIGNATURE = "ftyp".toByteArray()
 
         // Preferences vals
         private const val ENFORCE_LANGUAGE_PREF_KEY = "ENFORCE_LANGUAGE"
@@ -760,9 +760,6 @@ abstract class EHentai :
     private fun getOriginalImagePref(): Boolean = preferences.getBoolean("${ORIGINAL_IMAGE_PREF_KEY}_$lang", ORIGINAL_IMAGE_PREF_DEFAULT_VALUE)
 
     private fun getCookieValue(cookieTitle: String, defaultValue: String, prefKey: String): String {
-        // A set preference wins: addCookie copies it into the WebView store, so the WebView cookie can be an outdated copy of it
-        preferences.getString(prefKey, defaultValue)?.takeIf { it.isNotEmpty() }?.let { return it }
-
         val cookies = webViewCookieManager.getCookie("https://forums.e-hentai.org")
         var value: String? = null
 
@@ -777,7 +774,7 @@ abstract class EHentai :
             }
         }
 
-        return value ?: defaultValue
+        return value ?: preferences.getString(prefKey, defaultValue) ?: defaultValue
     }
 
     private fun getPassHashPref(): String = getCookieValue(PASS_HASH_PREF_TITLE, PASS_HASH_PREF_DEFAULT_VALUE, PASS_HASH_PREF_KEY)

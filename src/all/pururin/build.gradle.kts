@@ -16,4 +16,9 @@ keiyoushi {
             baseUrl = "https://pururin.me"
         }
     }
+
+    deeplink {
+        host("pururin.me")
+        path("/gallery/..*")
+    }
 }

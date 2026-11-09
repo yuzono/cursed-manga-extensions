@@ -41,14 +41,14 @@ class GalleryItem(
 
 @Serializable
 class Hentai(
-    val id: Int,
+    private val id: Int,
     val pages: List<Image> = emptyList(),
-    val thumbnail: Image,
+    private val thumbnail: Image,
     val tags: List<Tag>,
-    val title: Title,
+    private val title: Title,
     @SerialName("upload_date") private val uploadDate: Long,
-    @SerialName("num_favorites") val numFavorites: Long,
-    @SerialName("num_pages") val numPages: Int,
+    @SerialName("num_favorites") private val numFavorites: Long,
+    @SerialName("num_pages") private val numPages: Int,
 ) {
     fun toSManga(thumbServer: String, fullTitle: Boolean) = SManga.create().apply {
         val titles = this@Hentai.title

@@ -18,6 +18,7 @@ import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
+import keiyoushi.network.DEFAULT_CACHE_CONTROL
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
@@ -42,9 +43,14 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.seconds
 
+// Concrete so the generated sources keep this class name, which Komikku/SY match their delegated nHentai on
 @Source
-abstract class NHentai :
-    KeiSource(),
+class NHentai(
+    override val name: String,
+    override val lang: String,
+    override val baseUrl: String,
+    override val id: Long,
+) : KeiSource(),
     ConfigurableSource {
 
     private val nhLang: String by lazy {
@@ -169,9 +175,10 @@ abstract class NHentai :
         fetchChapters: Boolean,
     ): SMangaUpdate {
         val id = manga.url.removeSurrounding("/g/", "/")
-        val data = client.get("$apiUrl/galleries/$id", cacheControl = galleryCacheControl).parseAs<Hentai>()
+        val cacheControl = if (fetchDetails) DEFAULT_CACHE_CONTROL else galleryCacheControl
+        val data = client.get("$apiUrl/galleries/$id", cacheControl = cacheControl).parseAs<Hentai>()
         return SMangaUpdate(
-            manga = data.toSManga(getConfig().thumbServers.random(), displayFullTitle),
+            manga = if (fetchDetails) data.toSManga(getConfig().thumbServers.random(), displayFullTitle) else manga,
             chapters = listOf(data.toSChapter()),
         )
     }

@@ -22,8 +22,14 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Response
 import org.jsoup.nodes.Document
 
+// Concrete so the generated sources keep this class name, which Komikku/SY match their delegated Pururin on
 @Source
-abstract class Pururin : KeiSource() {
+class Pururin(
+    override val name: String,
+    override val lang: String,
+    override val baseUrl: String,
+    override val id: Long,
+) : KeiSource() {
     private val searchLang: Pair<String, String>? by lazy {
         when (lang) {
             "en" -> Pair("13010", "english")
@@ -104,10 +110,12 @@ abstract class Pururin : KeiSource() {
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
-        if (url.pathSegments.firstOrNull() != "gallery") return null
+        if (url.pathSegments.firstOrNull() != "gallery" || url.pathSegments.getOrNull(1)?.toIntOrNull() == null) return null
 
-        val document = client.get(url).asJsoup()
-        return parseDetails(document, url.encodedPath)
+        val response = client.get(url)
+        // Stored like browse links, so a pasted link doesn't add a second library entry
+        val canonicalUrl = response.request.url.toString().removeSuffix("/")
+        return parseDetails(response.asJsoup()).apply { setUrlWithoutDomain(canonicalUrl) }
     }
 
     // Details and chapters come from the same gallery page, so it is fetched once and both flags are ignored.
@@ -118,10 +126,9 @@ abstract class Pururin : KeiSource() {
         fetchChapters: Boolean,
     ): SMangaUpdate {
         val document = client.get("$baseUrl${manga.url}").asJsoup()
-        val details = parseDetails(document, manga.url)
+        val details = parseDetails(document).apply { url = manga.url }
 
-        val chapterLinks = document.select(".table-collection tbody tr a")
-        val parsed = chapterLinks
+        val parsed = document.select(".table-collection tbody tr a")
             .mapNotNull { element ->
                 SChapter.create().apply {
                     name = element.textOrNull() ?: return@mapNotNull null
@@ -131,9 +138,7 @@ abstract class Pururin : KeiSource() {
             }
             .reversed()
 
-        val chapterList = if (parsed.isNotEmpty() && (parsed.size == chapterLinks.size || chapters.isEmpty())) {
-            parsed
-        } else {
+        val chapterList = parsed.ifEmpty {
             chapters.ifEmpty {
                 listOf(
                     SChapter.create().apply {
@@ -171,10 +176,9 @@ abstract class Pururin : KeiSource() {
         return MangasPage(mangas, hasNextPage)
     }
 
-    private fun parseDetails(document: Document, mangaUrl: String): SManga = SManga.create().apply {
+    private fun parseDetails(document: Document): SManga = SManga.create().apply {
         val gallery = document.select(".box-gallery")
 
-        url = mangaUrl
         title = gallery.select(".title").text().ifEmpty { error("Title not found") }
         author = gallery.select("a[href*=/circle/]").eachText().joinToString()
             .ifEmpty { gallery.select("[itemprop=author]").text() }
@@ -204,13 +208,13 @@ abstract class Pururin : KeiSource() {
 
         if (num < 0) return minPages to maxPages
         return when (query.firstOrNull()) {
-            '<' -> 1 to if (query[1] == '=') limitedNum() else limitedNum(num + 1)
+            '<' -> 1 to if (query[1] == '=') limitedNum() else limitedNum(num - 1)
 
             '>' -> limitedNum(if (query[1] == '=') num else num + 1) to maxPages
 
             '=' -> when (query[1]) {
                 '>' -> limitedNum() to maxPages
-                '<' -> 1 to limitedNum(maxPages)
+                '<' -> 1 to limitedNum()
                 else -> limitedNum() to limitedNum()
             }
 
@@ -228,7 +232,7 @@ abstract class Pururin : KeiSource() {
             .add("text", tag)
             .build()
 
-        val tags = client.post("$baseUrl/api/get/tags/search", headers, requestBody).parseAs<List<Tag>>()
+        val tags = client.post("$baseUrl/api/get/tags/search", requestBody).parseAs<List<Tag>>()
         return findTagByNameSubstring(tags, type)
     }
 }
