@@ -52,7 +52,11 @@ abstract class Hentai2Read :
 
     private val preferences by getPreferencesLazy()
 
-    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(permits = 2, period = 1.seconds)
+    // Only the site itself; reader images come from the CDN.
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder {
+        val host = baseUrl.toHttpUrl().host
+        return rateLimit(permits = 2, period = 1.seconds) { it.host == host }
+    }
 
     override suspend fun getPopularManga(page: Int): MangasPage = client.get(rankingUrl(preferences.getString(PREF_POPULAR_PERIOD, "").orEmpty(), page)).asJsoup().toMangasPage()
 
