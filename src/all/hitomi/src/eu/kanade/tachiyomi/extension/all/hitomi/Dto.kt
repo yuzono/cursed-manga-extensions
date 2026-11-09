@@ -20,6 +20,7 @@ class Gallery(
     val characters: List<Character>?,
     val parodys: List<Parody>?,
     val files: List<ImageFile>,
+    val related: List<Int> = emptyList(),
 )
 
 @Serializable
