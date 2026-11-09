@@ -38,6 +38,7 @@ import uy.kohesive.injekt.api.get
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.seconds
 
@@ -65,8 +66,7 @@ abstract class NHentai :
 
     private val galleryCacheControl = CacheControl.Builder().maxStale(2, TimeUnit.HOURS).build()
 
-    @Volatile
-    private var nhConfig: NHConfig? = null
+    private val nhConfig = AtomicReference<NHConfig>()
 
     private var displayFullTitle: Boolean = when (preferences.getString(TITLE_PREF, "full")) {
         "full" -> true
@@ -262,20 +262,24 @@ abstract class NHentai :
     }
 
     private suspend fun getConfig(): NHConfig {
-        nhConfig?.let { return it }
+        nhConfig.get()?.let { return it }
         return try {
             client.get("$apiUrl/config").parseAs<NHConfig>().also {
                 require(it.imageServers.isNotEmpty() && it.thumbServers.isNotEmpty())
-                nhConfig = it
+                nhConfig.set(it)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // Not cached, so a failed lookup can never replace a config stored by a concurrent call
-            nhConfig ?: NHConfig(
-                (1..4).map { n -> "https://i$n.nhentai.net" },
-                (1..4).map { n -> "https://t$n.nhentai.net" },
+            // Stored so a failing endpoint isn't requested again on every call, but never over a config fetched by a concurrent call
+            nhConfig.compareAndSet(
+                null,
+                NHConfig(
+                    (1..4).map { n -> "https://i$n.nhentai.net" },
+                    (1..4).map { n -> "https://t$n.nhentai.net" },
+                ),
             )
+            nhConfig.get()
         }
     }
 
