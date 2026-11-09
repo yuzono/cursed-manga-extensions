@@ -2,15 +2,10 @@ package eu.kanade.tachiyomi.extension.all.ehentai
 
 import android.content.SharedPreferences
 import android.net.Uri
-import android.webkit.CookieManager
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.source.ConfigurableSource
-import eu.kanade.tachiyomi.source.model.Filter
-import eu.kanade.tachiyomi.source.model.Filter.CheckBox
-import eu.kanade.tachiyomi.source.model.Filter.Select
-import eu.kanade.tachiyomi.source.model.Filter.Text
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -27,6 +22,8 @@ import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.tryParseDateTime
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -71,7 +68,6 @@ abstract class EHentai :
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
-    private val webViewCookieManager: CookieManager by lazy { CookieManager.getInstance() }
     private val memberId: String by lazy { getMemberIdPref() }
     private val passHash: String by lazy { getPassHashPref() }
     private val igneous: String by lazy { getIgneousPref() }
@@ -164,6 +160,41 @@ abstract class EHentai :
     }
 
     private suspend fun fetchGallery(idAndToken: String): SManga = client.get("$baseUrl/g/$idAndToken", Fetch.DOCUMENT).toMangaDetails()
+
+    override val supportsRelatedMangas = true
+
+    // The site has no related list: other versions of the gallery first, then galleries by its artists or groups
+    override suspend fun fetchRelatedMangaList(manga: SManga): List<SManga> = coroutineScope {
+        val doc = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
+
+        val parentUrl = doc.select("#gdd tr")
+            .firstOrNull { it.selectFirst(".gdt1")?.text() == "Parent:" }
+            ?.selectFirst(".gdt2 a")?.absUrl("href")
+        val parent = parentUrl?.let { async { client.get(it, Fetch.DOCUMENT).toMangaDetails() } }
+
+        val newerVersions = doc.select("#gnd a").map { link ->
+            SManga.create().apply {
+                url = ExGalleryMetadata.normalizeUrl(link.attr("href"))
+                title = link.text()
+            }
+        }
+
+        val creatorTerms = doc.select("#taglist tr").flatMap { row ->
+            val namespace = row.selectFirst(".tc")?.text()?.removeSuffix(":")
+            if (namespace !in CREATOR_NAMESPACES) return@flatMap emptyList()
+            row.select("div").map { "$namespace:\"${it.text()}$\"" }
+        }
+        // ~ ORs the terms, so a gallery by any one of them matches
+        val sameCreators = async {
+            if (creatorTerms.isEmpty()) return@async emptyList()
+            val query = if (creatorTerms.size == 1) creatorTerms.single() else creatorTerms.joinToString(" ") { "~$it" }
+            getSearchMangaList(1, query, FilterList()).mangas
+        }
+
+        (listOfNotNull(parent?.await()) + newerVersions + sameCreators.await())
+            .distinctBy { it.url }
+            .filterNot { it.url == manga.url }
+    }
 
     private suspend fun loadListing(listingUrl: String, page: Int, useFrom: Boolean = false): MangasPage {
         // Resume from the nearest page whose cursor is still cached, or from the first page if none is
@@ -415,19 +446,7 @@ abstract class EHentai :
         return "$imgUrl#$bakUrl"
     }
 
-    override fun getFilterList(data: JsonElement?) = FilterList(
-        EnforceLanguageFilter(getEnforceLanguagePref()),
-        Favorites(),
-        Watched(),
-        GenreGroup(),
-        Filter.Header("Separate tags with commas (,)"),
-        Filter.Header("Prepend with dash (-) to exclude"),
-        Filter.Header("Use 'Female Tags' or 'Male Tags' for specific categories. 'Tags' searches all categories."),
-        TextFilter("Tags", "tag"),
-        TextFilter("Female Tags", "female"),
-        TextFilter("Male Tags", "male"),
-        AdvancedGroup(),
-    )
+    override fun getFilterList(data: JsonElement?) = getFilters(getEnforceLanguagePref())
 
     private val languageMappings = listOf(
         Pair("japanese", listOf("0", "1024", "2048")),
@@ -522,128 +541,16 @@ abstract class EHentai :
         .appendQueryParameter(param, value)
         .toString()
 
-    internal open class TextFilter(name: String, val type: String, val specific: String = "") : Text(name)
-
     @Serializable
     class MpvImageDto(
         @SerialName("k") val key: String,
     )
-    class Watched :
-        CheckBox("Watched List"),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state) {
-                builder.appendPath("watched")
-            }
-        }
-    }
-
-    class Favorites :
-        CheckBox("Favorites"),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state) {
-                builder.appendPath("favorites.php")
-            }
-        }
-    }
-
-    class GenreOption(name: String, private val genreId: String) :
-        CheckBox(name, false),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            builder.appendQueryParameter("f_$genreId", if (state) "1" else "0")
-        }
-    }
-
-    class GenreGroup :
-        UriGroup<GenreOption>(
-            "Genres",
-            listOf(
-                GenreOption("Dōjinshi", "doujinshi"),
-                GenreOption("Manga", "manga"),
-                GenreOption("Artist CG", "artistcg"),
-                GenreOption("Game CG", "gamecg"),
-                GenreOption("Western", "western"),
-                GenreOption("Non-H", "non-h"),
-                GenreOption("Image Set", "imageset"),
-                GenreOption("Cosplay", "cosplay"),
-                GenreOption("Asian Porn", "asianporn"),
-                GenreOption("Misc", "misc"),
-            ),
-        )
-
-    class AdvancedOption(name: String, private val param: String, defValue: Boolean = false) :
-        CheckBox(name, defValue),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state) {
-                builder.appendQueryParameter(param, "on")
-            }
-        }
-    }
-
-    open class PageOption(name: String, private val queryKey: String) :
-        Text(name),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state.isNotBlank()) {
-                if (builder.build().getQueryParameters("f_sp").isEmpty()) {
-                    builder.appendQueryParameter("f_sp", "on")
-                }
-
-                builder.appendQueryParameter(queryKey, state.trim())
-            }
-        }
-    }
-
-    class MinPagesOption : PageOption("Minimum Pages", "f_spf")
-    class MaxPagesOption : PageOption("Maximum Pages", "f_spt")
-
-    class RatingOption :
-        Select<String>(
-            "Minimum Rating",
-            arrayOf(
-                "Any",
-                "2 stars",
-                "3 stars",
-                "4 stars",
-                "5 stars",
-            ),
-        ),
-        UriFilter {
-        override fun addToUri(builder: Uri.Builder) {
-            if (state > 0) {
-                builder.appendQueryParameter("f_srdd", (state + 1).toString())
-                builder.appendQueryParameter("f_sr", "on")
-            }
-        }
-    }
-
-    // Explicit type arg for listOf() to workaround this: KT-16570
-    class AdvancedGroup :
-        UriGroup<Filter<*>>(
-            "Advanced Options",
-            listOf(
-                AdvancedOption("Search Gallery Name", "f_sname", true),
-                AdvancedOption("Search Gallery Tags", "f_stags", true),
-                AdvancedOption("Search Gallery Description", "f_sdesc"),
-                AdvancedOption("Search Torrent Filenames", "f_storr"),
-                AdvancedOption("Only Show Galleries With Torrents", "f_sto"),
-                AdvancedOption("Search Low-Power Tags", "f_sdt1"),
-                AdvancedOption("Search Downvoted Tags", "f_sdt2"),
-                AdvancedOption("Show Expunged Galleries", "f_sh"),
-                RatingOption(),
-                MinPagesOption(),
-                MaxPagesOption(),
-            ),
-        )
-
-    private class EnforceLanguageFilter(default: Boolean) : CheckBox("Enforce language", default)
 
     companion object {
         const val QUERY_PREFIX = "?f_apply=Apply+Filter"
         const val PREFIX_ID_SEARCH = "id:"
+        private val CREATOR_NAMESPACES = setOf("artist", "group")
+        private val FORUMS_URL = "https://forums.e-hentai.org".toHttpUrl()
         const val TR_SUFFIX = "TR"
 
         private const val MAX_CURSORS = 100
@@ -761,19 +668,10 @@ abstract class EHentai :
     private fun getOriginalImagePref(): Boolean = preferences.getBoolean("${ORIGINAL_IMAGE_PREF_KEY}_$lang", ORIGINAL_IMAGE_PREF_DEFAULT_VALUE)
 
     private fun getCookieValue(cookieTitle: String, defaultValue: String, prefKey: String): String {
-        val cookies = webViewCookieManager.getCookie("https://forums.e-hentai.org")
-        var value: String? = null
-
-        if (cookies != null) {
-            val cookieArray = cookies.split("; ")
-            for (cookie in cookieArray) {
-                if (cookie.startsWith("$cookieTitle=")) {
-                    value = cookie.split("=")[1]
-
-                    break
-                }
-            }
-        }
+        // The app's cookie jar holds the WebView login; this source's own client sends no cookie jar
+        val value = network.client.cookieJar.loadForRequest(FORUMS_URL)
+            .firstOrNull { it.name == cookieTitle }
+            ?.value
 
         return value ?: preferences.getString(prefKey, defaultValue) ?: defaultValue
     }
