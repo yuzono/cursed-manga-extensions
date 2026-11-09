@@ -310,7 +310,7 @@ abstract class EHentai :
                                         left.removeSuffix(":")
                                             .lowercase()
                                     ) {
-                                        "posted" -> datePosted = EX_DATE_FORMAT.tryParseDateTime(right, ZoneOffset.UTC)
+                                        "posted" -> datePosted = EX_DATE_FORMAT.tryParseDateTime(right, ZoneOffset.UTC).takeIf { it != 0L }
 
                                         "visible" -> visible = right.nullIfBlank()
 
