@@ -760,6 +760,9 @@ abstract class EHentai :
     private fun getOriginalImagePref(): Boolean = preferences.getBoolean("${ORIGINAL_IMAGE_PREF_KEY}_$lang", ORIGINAL_IMAGE_PREF_DEFAULT_VALUE)
 
     private fun getCookieValue(cookieTitle: String, defaultValue: String, prefKey: String): String {
+        // A set preference wins: addCookie copies it into the WebView store, so the WebView cookie can be an outdated copy of it
+        preferences.getString(prefKey, defaultValue)?.takeIf { it.isNotEmpty() }?.let { return it }
+
         val cookies = webViewCookieManager.getCookie("https://forums.e-hentai.org")
         var value: String? = null
 
@@ -774,11 +777,7 @@ abstract class EHentai :
             }
         }
 
-        if (value == null) {
-            value = preferences.getString(prefKey, defaultValue) ?: defaultValue
-        }
-
-        return value
+        return value ?: defaultValue
     }
 
     private fun getPassHashPref(): String = getCookieValue(PASS_HASH_PREF_TITLE, PASS_HASH_PREF_DEFAULT_VALUE, PASS_HASH_PREF_KEY)
