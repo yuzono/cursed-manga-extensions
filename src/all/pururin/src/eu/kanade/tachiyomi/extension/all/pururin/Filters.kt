@@ -29,7 +29,7 @@ internal class TypeFilter(name: String) :
         name,
         listOf(
             Pair("Artbook", "17783"),
-            Pair("Artist CG", "13004"),
+            Pair("Artist CG", "13006"),
             Pair("Doujinshi", "13003"),
             Pair("Game CG", "13008"),
             Pair("Manga", "13004"),
