@@ -266,13 +266,14 @@ class Pururin(
     // Used by Komikku's delegated Pururin, which requests the gallery page itself and parses its details
     // with the site's old markup
 
-    fun mangaDetailsRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers).newBuilder()
-        .fetch(Fetch.DOCUMENT)
+    fun mangaDetailsRequest(manga: SManga): Request = chapterListRequest(manga).newBuilder()
         .tag(LegacyMarkup::class.java, LegacyMarkup)
         .build()
 
-    // Komikku's default sends it without browser headers; the old markup doesn't change the chapter list
-    fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+    // Komikku's default sends it without browser headers
+    fun chapterListRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers).newBuilder()
+        .fetch(Fetch.DOCUMENT)
+        .build()
 
     private object LegacyMarkup
 
