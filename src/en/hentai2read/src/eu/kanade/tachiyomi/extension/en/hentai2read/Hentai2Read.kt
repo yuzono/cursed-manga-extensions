@@ -20,8 +20,6 @@ import keiyoushi.utils.firstInstance
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.intOrNull
 import keiyoushi.utils.parseAs
-import keiyoushi.utils.selectLast
-import keiyoushi.utils.textOrNull
 import keiyoushi.utils.toJsonElement
 import keiyoushi.utils.tryParseDate
 import kotlinx.coroutines.async
@@ -30,14 +28,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
 import java.io.IOException
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -113,17 +108,14 @@ abstract class Hentai2Read :
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
         val document = client.get(url.newBuilder().scheme("https").build(), Fetch.DOCUMENT).asJsoup()
-        val canonical = document.selectFirst("link[rel=canonical]")?.absUrl("href")
-        if (document.selectFirst(TITLE_SELECTOR) == null) {
-            // A reader page's canonical link is its book page.
-            if (url.pathSegments.firstOrNull() != "reader") return null
-            return canonical?.toHttpUrlOrNull()
+        // A reader page's canonical link is its book page.
+        if (url.pathSegments.firstOrNull() == "reader") {
+            return document.selectFirst("link[rel=canonical]")?.absUrl("href")?.toHttpUrlOrNull()
                 ?.takeIf { it.pathSegments.firstOrNull() != "reader" }
                 ?.let { getMangaByUrl(it) }
         }
-        return parseMangaDetails(document, document.singleChapterPages()).apply {
-            setUrlWithoutDomain(canonical ?: url.toString())
-        }
+        val book = document.parsePageDataOrNull<BookPageDto>() ?: return null
+        return book.toSManga(document.singleChapterPages(book))
     }
 
     override suspend fun getMangasByUrl(url: HttpUrl, page: Int): MangasPage {
@@ -143,33 +135,10 @@ abstract class Hentai2Read :
 
     private fun listingUrl(path: String, page: Int) = if (page > 1) "$baseUrl$path/page-$page" else "$baseUrl$path"
 
+    // Logged in, the site sends pages without their rendered HTML (the browser builds it), so only the page data is read.
     private fun Document.toMangasPage(): MangasPage {
-        // The cover badge abbreviates above 1000 ("1.8K pages"), so multi-chapter totals come from the page JSON.
-        val pageCounts = parsePageDataOrNull<ListingDto>()?.books.orEmpty()
-            .filter { (it.chapters ?: 0) > 1 }
-            .mapNotNull { book -> book.pageCount?.let { book.id to it } }
-            .toMap()
-        val mangas = select(MANGA_SELECTOR).map { mangaFromElement(it, pageCounts) }
-        val hasNextPage = selectFirst(NEXT_PAGE_SELECTOR) != null
-        return MangasPage(mangas, hasNextPage)
-    }
-
-    private fun mangaFromElement(element: Element, pageCounts: Map<Int, Int>) = SManga.create().apply {
-        val link = element.selectFirst("h3 a, h2 a")!!
-        setUrlWithoutDomain(link.absUrl("href"))
-        title = link.text()
-        thumbnail_url = element.selectFirst("img")?.absUrl("src")
-
-        element.selectFirst("a[href^=/artist/]")?.textOrNull()
-            ?.takeIf { it != "Unknown" }
-            ?.let {
-                artist = it
-                author = it
-            }
-
-        element.attr("data-book").ifEmpty { element.attr("data-peek") }.toIntOrNull()
-            ?.let { pageCounts[it] }
-            ?.let { count -> memo = buildJsonObject { put(MEMO_PAGE_COUNT, count) } }
+        val listing = parsePageData<ListingDto>()
+        return MangasPage(listing.books.map { it.toSManga() }, listing.hasNextPage)
     }
 
     // Details and chapters share one page, so both are always returned.
@@ -180,19 +149,19 @@ abstract class Hentai2Read :
         fetchChapters: Boolean,
     ): SMangaUpdate {
         val document = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
-        val title = document.selectFirst(TITLE_SELECTOR)?.text()
+        val book = document.parsePageDataOrNull<BookPageDto>()
             ?: throw Exception("Manga page not found. Migrate or re-add this entry.")
 
         // Multi-chapter books have no count on their own page: a details refresh looks up the current one,
         // otherwise the count from browsing or an earlier refresh is kept.
-        val pages = document.singleChapterPages()
-            ?: (if (fetchDetails) fetchPagesFromSearch(document, title) else null)
+        val pages = document.singleChapterPages(book)
+            ?: (if (fetchDetails) fetchPagesFromSearch(book) else null)
             ?: manga.memo[MEMO_PAGE_COUNT]?.intOrNull
 
-        val parsedChapters = parseChapters(document)
+        val parsedChapters = parseChapters(book)
 
         return SMangaUpdate(
-            manga = parseMangaDetails(document, pages).apply {
+            manga = book.toSManga(pages).apply {
                 url = manga.url
                 // Saved so a later chapters-only refresh doesn't fall back to an older count from browsing.
                 memo = pages?.let { JsonObject(manga.memo + (MEMO_PAGE_COUNT to JsonPrimitive(it))) } ?: manga.memo
@@ -204,43 +173,11 @@ abstract class Hentai2Read :
         )
     }
 
-    private fun parseMangaDetails(document: Document, pages: Int?) = SManga.create().apply {
-        title = document.selectFirst(TITLE_SELECTOR)!!.text()
-        thumbnail_url = document.selectFirst("img[alt^=Cover of]")?.absUrl("src")
-
-        val artists = document.select("dl a[href^=/artist/]")
-            .map { it.text() }
-            .filter { it.isNotEmpty() && it != "Unknown" }
-            .joinToString()
-            .ifEmpty { null }
-        artist = artists
-        author = artists
-
-        genre = document.select("ul[aria-label=Tags] a").joinToString { it.text() }
-        status = parseStatus(document.infoValue("Status").orEmpty())
-
-        description = buildString {
-            fun section(label: String, value: String?) {
-                if (value.isNullOrEmpty()) return
-                if (isNotEmpty()) append("\n\n")
-                append(label, ":\n", value)
-            }
-
-            section("Alternative Title", document.selectFirst("$TITLE_SELECTOR + p")?.text())
-            section("Parody", document.select("dl a[href^=/parody/]").joinToString { it.text() })
-            section("Character", document.select("dl a[href^=/character/]").joinToString { it.text() })
-            section("Type", document.infoValue("Type"))
-            section("Pages", pages?.toString())
-            section("Language", document.infoValue("Language"))
-            section("Released", document.infoValue("Released"))
-        }
-    }
-
     // The book id comes from the page, so entries stored under pre-redesign URLs are found too.
-    private suspend fun fetchPagesFromSearch(document: Document, title: String): Int? {
-        val id = document.parsePageDataOrNull<BookPageDto>()?.id ?: return null
+    private suspend fun fetchPagesFromSearch(book: BookPageDto): Int? {
+        val id = book.id
         return try {
-            val url = "$baseUrl/search".toHttpUrl().newBuilder().addQueryParameter("q", title).build()
+            val url = "$baseUrl/search".toHttpUrl().newBuilder().addQueryParameter("q", book.title).build()
             // An error page (e.g. a Cloudflare 403) has no page data, so it yields null instead of throwing.
             client.get(url, Fetch.DOCUMENT, ensureSuccess = false).asJsoup().parsePageDataOrNull<ListingDto>()?.books.orEmpty()
                 .firstOrNull { it.id == id }?.pageCount
@@ -250,8 +187,8 @@ abstract class Hentai2Read :
     }
 
     // Only single-chapter books have numberOfPages in their JSON-LD.
-    private fun Document.singleChapterPages(): Int? {
-        if (select("li[id^=chapter-]").size != 1) return null
+    private fun Document.singleChapterPages(book: BookPageDto): Int? {
+        if (book.chapters.size != 1) return null
         return runCatching {
             selectFirst("script[type=application/ld+json]")
                 ?.data()
@@ -260,47 +197,14 @@ abstract class Hentai2Read :
         }.getOrNull()
     }
 
-    private fun Document.infoValue(label: String): String? = select("dl dt")
-        .firstOrNull { it.text().equals(label, ignoreCase = true) }
-        ?.nextElementSibling()
-        ?.textOrNull()
-
-    private fun parseStatus(status: String): Int {
-        val value = status.lowercase()
-        return when {
-            "ongoing" in value -> SManga.ONGOING
-            "completed" in value -> SManga.COMPLETED
-            else -> SManga.UNKNOWN
-        }
-    }
-
-    private fun parseChapters(document: Document): List<SChapter> {
-        val jsonChapters = document.parsePageDataOrNull<BookPageDto>()?.chapters.orEmpty()
-        if (jsonChapters.isNotEmpty()) {
-            return jsonChapters.map { chapter ->
-                val number = chapter.number?.takeIf { it.isNotEmpty() }
-                val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ").ifEmpty { "Chapter" }
-                SChapter.create().apply {
-                    setUrlWithoutDomain(chapter.url)
-                    name = if (chapter.isMembers) "🔒 $label" else label
-                    chapter_number = number?.toFloatOrNull() ?: -1f
-                    date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
-                }
-            }
-        }
-
-        return document.select("li[id^=chapter-]").map { li ->
-            val link = li.selectFirst("a[href^=/reader/]")!!
-            // Without a number span, the first span is the badge or date.
-            val number = li.selectFirst("span")?.text()?.takeIf { it.toFloatOrNull() != null }
-
-            SChapter.create().apply {
-                setUrlWithoutDomain(link.absUrl("href"))
-                name = if (number != null) "Ch. $number - ${link.text()}" else link.text()
-                chapter_number = number?.toFloat() ?: -1f
-                // A "New" badge span can sit between the title and the date, so take the last span.
-                date_upload = dateFormat.tryParseDate(li.selectLast("a[href^=/reader/] ~ span")?.text(), ZoneOffset.UTC)
-            }
+    private fun parseChapters(book: BookPageDto): List<SChapter> = book.chapters.map { chapter ->
+        val number = chapter.number?.takeIf { it.isNotEmpty() }
+        val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ").ifEmpty { "Chapter" }
+        SChapter.create().apply {
+            setUrlWithoutDomain(chapter.url)
+            name = if (chapter.isMembers) "🔒 $label" else label
+            chapter_number = number?.toFloatOrNull() ?: -1f
+            date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
         }
     }
 
@@ -363,16 +267,8 @@ abstract class Hentai2Read :
 
     companion object {
         private const val MAX_TAG_PAGES = 10
-        private const val MEMO_PAGE_COUNT = "pageCount"
 
         private const val PREF_POPULAR_PERIOD = "popular_period"
-
-        private const val TITLE_SELECTOR = "h1#book-title"
-
-        // Sponsored tiles use <article data-promo> and are excluded. The ranking's top three aren't cards:
-        // they're <li data-peek> items with an h2 title.
-        private const val MANGA_SELECTOR = "article[data-card][data-book], ol[aria-label='Top three'] > li[data-peek]"
-        private const val NEXT_PAGE_SELECTOR = "nav[aria-label=Pages] a[rel=next]"
 
         private val LISTING_TYPES = setOf("category", "content", "artist", "parody", "character", "language")
         private val PAGE_SEGMENT_REGEX = Regex("""page-\d+""")
