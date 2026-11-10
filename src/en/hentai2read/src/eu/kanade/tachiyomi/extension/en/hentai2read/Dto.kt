@@ -169,8 +169,8 @@ class BookPageDto(private val props: Props) {
         description = buildString {
             fun section(label: String, value: String?) {
                 if (value.isNullOrEmpty()) return
-                if (isNotEmpty()) append("\n\n")
-                append(label, ":\n", value)
+                if (isNotEmpty()) append("\n")
+                append(label, ": ", value)
             }
 
             section("Alternative Title", book.alt)
