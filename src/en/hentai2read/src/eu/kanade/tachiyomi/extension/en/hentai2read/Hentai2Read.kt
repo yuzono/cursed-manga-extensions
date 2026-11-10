@@ -21,21 +21,18 @@ import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.intOrNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonElement
-import keiyoushi.utils.tryParseDate
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
 import java.io.IOException
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlin.time.Duration.Companion.seconds
 
 @Source
@@ -109,11 +106,11 @@ abstract class Hentai2Read :
         val document = client.get(url.newBuilder().scheme("https").build(), Fetch.DOCUMENT).asJsoup()
         // A reader page's canonical link is the reader page itself, so its book comes from the page data.
         if (url.pathSegments.firstOrNull() == "reader") {
-            val bookUrl = document.parsePageDataOrNull<ReaderDto>()?.bookUrl ?: return null
+            val bookUrl = document.parsePageData<ReaderDto>().bookUrl ?: return null
             return getMangaByUrl("$baseUrl$bookUrl".toHttpUrl())
         }
-        val book = document.parsePageDataOrNull<BookPageDto>() ?: return null
-        return book.toSManga(document.singleChapterPages(book))
+        val book = document.parseBookPageOrNull() ?: return null
+        return book.toSManga(book.singleChapterPages)
     }
 
     override suspend fun getMangasByUrl(url: HttpUrl, page: Int): MangasPage {
@@ -147,16 +144,16 @@ abstract class Hentai2Read :
         fetchChapters: Boolean,
     ): SMangaUpdate {
         val document = client.get("$baseUrl${manga.url}", Fetch.DOCUMENT).asJsoup()
-        val book = document.parsePageDataOrNull<BookPageDto>()
+        val book = document.parseBookPageOrNull()
             ?: throw Exception("Manga page not found. Migrate or re-add this entry.")
 
         // Multi-chapter books have no count on their own page: a details refresh looks up the current one,
         // otherwise the count from browsing or an earlier refresh is kept.
-        val pages = document.singleChapterPages(book)
+        val pages = book.singleChapterPages
             ?: (if (fetchDetails) fetchPagesFromSearch(book) else null)
             ?: manga.memo[MEMO_PAGE_COUNT]?.intOrNull
 
-        val parsedChapters = parseChapters(book)
+        val parsedChapters = book.chapters.map { it.toSChapter() }
 
         return SMangaUpdate(
             manga = book.toSManga(pages).apply {
@@ -172,38 +169,13 @@ abstract class Hentai2Read :
     }
 
     // The book id comes from the page, so entries stored under pre-redesign URLs are found too.
-    private suspend fun fetchPagesFromSearch(book: BookPageDto): Int? {
-        val id = book.id
-        return try {
-            val url = "$baseUrl/search".toHttpUrl().newBuilder().addQueryParameter("q", book.title).build()
-            // An error page (e.g. a Cloudflare 403) has no page data, so it yields null instead of throwing.
-            client.get(url, Fetch.DOCUMENT, ensureSuccess = false).asJsoup().parsePageDataOrNull<ListingDto>()?.books.orEmpty()
-                .firstOrNull { it.id == id }?.pageCount
-        } catch (_: IOException) {
-            null // a failed lookup shouldn't break the details refresh
-        }
-    }
-
-    // Only single-chapter books have numberOfPages in their JSON-LD.
-    private fun Document.singleChapterPages(book: BookPageDto): Int? {
-        if (book.chapters.size != 1) return null
-        return runCatching {
-            selectFirst("script[type=application/ld+json]")
-                ?.data()
-                ?.parseAs<List<JsonLdDto>>()
-                ?.firstNotNullOfOrNull { it.bookPages }
-        }.getOrNull()
-    }
-
-    private fun parseChapters(book: BookPageDto): List<SChapter> = book.chapters.map { chapter ->
-        val number = chapter.number?.takeIf { it.isNotEmpty() }
-        val label = listOfNotNull(number?.let { "Ch. $it" }, chapter.title?.ifEmpty { null }).joinToString(" - ").ifEmpty { "Chapter" }
-        SChapter.create().apply {
-            setUrlWithoutDomain(chapter.url)
-            name = if (chapter.isMembers) "🔒 $label" else label
-            chapter_number = number?.toFloatOrNull() ?: -1f
-            date_upload = dateFormat.tryParseDate(chapter.date, ZoneOffset.UTC)
-        }
+    private suspend fun fetchPagesFromSearch(book: BookPageDto): Int? = try {
+        val url = "$baseUrl/search".toHttpUrl().newBuilder().addQueryParameter("q", book.title).build()
+        // An error page (e.g. a Cloudflare 403) has no page data, so it yields null instead of throwing.
+        client.get(url, Fetch.DOCUMENT, ensureSuccess = false).asJsoup().parsePageDataOrNull<ListingDto>()?.books.orEmpty()
+            .firstOrNull { it.id == book.id }?.pageCount
+    } catch (_: IOException) {
+        null // a failed lookup shouldn't break the details refresh
     }
 
     override val supportsRelatedMangas = true
@@ -263,6 +235,14 @@ abstract class Hentai2Read :
 
     private inline fun <reified T> Document.parsePageDataOrNull(): T? = runCatching { parsePageData<T>() }.getOrNull()
 
+    // Null only for a page that isn't a book's: a book page that fails to decode throws, so a site change
+    // isn't reported as a removed entry.
+    private fun Document.parseBookPageOrNull(): BookPageDto? {
+        val data = parsePageDataOrNull<JsonObject>() ?: return null
+        if (data["component"]?.jsonPrimitive?.content != "Book/Show") return null
+        return data.parseAs<BookPageDto>()
+    }
+
     companion object {
         private const val MAX_TAG_PAGES = 10
 
@@ -270,7 +250,5 @@ abstract class Hentai2Read :
 
         private val LISTING_TYPES = setOf("category", "content", "artist", "parody", "character", "language")
         private val PAGE_SEGMENT_REGEX = Regex("""page-\d+""")
-
-        private val dateFormat = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.ENGLISH)
     }
 }

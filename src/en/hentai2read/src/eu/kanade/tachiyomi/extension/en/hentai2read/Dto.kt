@@ -1,13 +1,22 @@
 package eu.kanade.tachiyomi.extension.en.hentai2read
 
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.tryParseDate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 internal const val MEMO_PAGE_COUNT = "pageCount"
+
+private val dateFormat = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.ENGLISH)
 
 @Serializable
 class ListingDto(private val props: Props) {
@@ -95,6 +104,7 @@ class BookPageDto(private val props: Props) {
         val book: Book,
         val chapters: List<Chapter> = emptyList(),
         val related: List<Related> = emptyList(),
+        val jsonLd: List<JsonElement> = emptyList(),
     )
 
     @Serializable
@@ -121,12 +131,23 @@ class BookPageDto(private val props: Props) {
 
     @Serializable
     class Chapter(
-        val number: String? = null,
-        val title: String? = null,
-        val url: String,
-        val date: String? = null,
-        val isMembers: Boolean = false,
-    )
+        private val number: String? = null,
+        private val title: String? = null,
+        private val url: String,
+        private val date: String? = null,
+        private val isMembers: Boolean = false,
+    ) {
+        fun toSChapter(): SChapter {
+            val chapterNumber = number?.takeIf { it.isNotEmpty() }
+            val label = listOfNotNull(chapterNumber?.let { "Ch. $it" }, title?.ifEmpty { null }).joinToString(" - ").ifEmpty { "Chapter" }
+            return SChapter.create().apply {
+                url = this@Chapter.url
+                name = if (isMembers) "🔒 $label" else label
+                chapter_number = chapterNumber?.toFloatOrNull() ?: -1f
+                date_upload = dateFormat.tryParseDate(date, ZoneOffset.UTC)
+            }
+        }
+    }
 
     @Serializable
     class Related(
@@ -145,6 +166,11 @@ class BookPageDto(private val props: Props) {
     val title get() = props.book.title
     val chapters get() = props.chapters
     val related get() = props.related
+
+    // Only single-chapter books have numberOfPages in their JSON-LD. Entries are decoded one by one, so an
+    // unexpected one only loses the count instead of failing the whole page.
+    val singleChapterPages get() = props.jsonLd.takeIf { props.chapters.size == 1 }
+        ?.firstNotNullOfOrNull { runCatching { it.parseAs<JsonLdDto>() }.getOrNull()?.bookPages }
 
     fun toSManga(pages: Int?) = SManga.create().apply {
         val book = props.book
