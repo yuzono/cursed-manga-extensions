@@ -30,7 +30,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
 import java.io.IOException
@@ -108,11 +107,10 @@ abstract class Hentai2Read :
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
         val document = client.get(url.newBuilder().scheme("https").build(), Fetch.DOCUMENT).asJsoup()
-        // A reader page's canonical link is its book page.
+        // A reader page's canonical link is the reader page itself, so its book comes from the page data.
         if (url.pathSegments.firstOrNull() == "reader") {
-            return document.selectFirst("link[rel=canonical]")?.absUrl("href")?.toHttpUrlOrNull()
-                ?.takeIf { it.pathSegments.firstOrNull() != "reader" }
-                ?.let { getMangaByUrl(it) }
+            val bookUrl = document.parsePageDataOrNull<ReaderDto>()?.bookUrl ?: return null
+            return getMangaByUrl("$baseUrl$bookUrl".toHttpUrl())
         }
         val book = document.parsePageDataOrNull<BookPageDto>() ?: return null
         return book.toSManga(document.singleChapterPages(book))

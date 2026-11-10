@@ -4,9 +4,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
 internal const val MEMO_PAGE_COUNT = "pageCount"
@@ -108,8 +106,8 @@ class BookPageDto(private val props: Props) {
         val alt: String? = null,
         val type: Label? = null,
         val status: Label? = null,
-        // Not seen filled in yet, so its type is left open.
-        val year: JsonPrimitive? = null,
+        // Null when the site shows "Unknown".
+        val year: Int? = null,
         val tags: List<TagDto> = emptyList(),
         val groups: List<Group> = emptyList(),
     )
@@ -181,7 +179,7 @@ class BookPageDto(private val props: Props) {
             section("Type", book.type?.label)
             section("Pages", pages?.toString())
             section("Language", group("language").joinToString())
-            section("Released", book.year?.contentOrNull)
+            section("Released", book.year?.toString())
         }
     }
 }
@@ -191,9 +189,15 @@ class ReaderDto(private val props: Props) {
 
     @Serializable
     class Props(
+        val book: Book? = null,
         val images: List<String?> = emptyList(),
         val avif: List<String?> = emptyList(),
     )
+
+    @Serializable
+    class Book(val url: String)
+
+    val bookUrl get() = props.book?.url
 
     // `avif` holds the same pages by index, so either list fills a page missing from the other
     fun toPages(preferAvif: Boolean): List<Page> = (0 until maxOf(props.images.size, props.avif.size))
