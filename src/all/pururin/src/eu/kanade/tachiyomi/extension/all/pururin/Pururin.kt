@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonElement
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -51,17 +52,7 @@ class Pururin(
             else -> ""
         }
 
-    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = addInterceptor { chain ->
-        val response = chain.proceed(chain.request())
-        if (chain.request().tag(LegacyMarkup::class.java) == null || !response.isSuccessful) return@addInterceptor response
-
-        val contentType = response.body.contentType()
-        val document = response.asJsoup().apply { toLegacyMarkup(response.request.url.encodedPath) }
-        response.newBuilder()
-            .removeHeader("Content-Length")
-            .body(document.outerHtml().toResponseBody(contentType))
-            .build()
-    }
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = addInterceptor(this@Pururin::legacyMarkupInterceptor)
 
     override suspend fun getPopularManga(page: Int): MangasPage = client.get("$baseUrl/browse$langPath?sort=most-popular&page=$page", Fetch.DOCUMENT).parseMangaList()
 
@@ -276,6 +267,18 @@ class Pururin(
         .build()
 
     private object LegacyMarkup
+
+    private fun legacyMarkupInterceptor(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        if (chain.request().tag(LegacyMarkup::class.java) == null || !response.isSuccessful) return response
+
+        val contentType = response.body.contentType()
+        val document = response.asJsoup().apply { toLegacyMarkup(response.request.url.encodedPath) }
+        return response.newBuilder()
+            .removeHeader("Content-Length")
+            .body(document.outerHtml().toResponseBody(contentType))
+            .build()
+    }
 
     private fun Document.toLegacyMarkup(galleryPath: String) {
         select(".box-gallery .table-info").addClass("table-gallery-info")
